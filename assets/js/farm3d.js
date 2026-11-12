@@ -139,10 +139,12 @@
     var g = new T.Group();
     var w = b.w, d = b.d;
     if (b.kind === "barn") {
-      g.add(box(w, 7, d, mat("#f1efe9"), 0, 2.5, 0));
-      var r = prism(d + 1, 4.5, w + 1, mat("#1d1f21")); r.rotation.y = Math.PI / 2; r.position.y = 6; g.add(r);
-      for (var i = -3; i <= 3; i++) g.add(box(2.4, 1.4, 0.2, WIN, i * (w / 8), 4.5, d / 2 + 0.05));
-      g.add(box(4, 5, 0.3, mat("#6b6255"), w / 2 - 6, 2.5, d / 2 + 0.1));
+      // white walls, black roof (all of the farm's barns)
+      var bh = w > 30 ? 6.5 : w > 14 ? 5.5 : 4;
+      g.add(box(w, bh, d, mat("#f1efe9"), 0, bh / 2 - 0.5, 0));
+      var r = prism(d + 1, Math.min(4.5, d * 0.32), w + 1, mat("#1d1f21")); r.rotation.y = Math.PI / 2; r.position.y = bh - 0.5; g.add(r);
+      if (w > 30) for (var i = -3; i <= 3; i++) g.add(box(2.2, 1.2, 0.2, WIN, i * (w / 8), bh - 2, d / 2 + 0.05));
+      if (w > 12) g.add(box(Math.min(4, w * 0.3), Math.min(4.5, bh - 1), 0.3, mat("#2b2d2f"), w > 30 ? w / 2 - 6 : 0, (Math.min(4.5, bh - 1)) / 2 - 0.4, d / 2 + 0.1));
     } else if (b.kind === "lodge") {
       // the Lodge: two storeys, brown siding, steep Tudor-style gables; the gabled front
       // (local +z) is rotated in the layout to face the parking court

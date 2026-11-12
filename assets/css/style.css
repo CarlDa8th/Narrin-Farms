@@ -626,3 +626,12 @@ table.compare { width: 100%; border-collapse: collapse; min-width: 680px; }
 .leaflet-tooltip.map-label.seat { font-weight: 600; color: #84311f; }
 .leaflet-tooltip.map-label.park { background: #fbf8f2; padding: 4px 8px; border-radius: 6px; color: #3f5a3f; }
 .is-plan.zoomed-in .leaflet-tooltip.map-label { display: none; }
+.township-label { font-family: var(--sans); font-size: .58rem; letter-spacing: .16em; text-transform: uppercase; color: #6f8a63; text-align: center; white-space: nowrap; pointer-events: none; }
+.road-shield { display: grid !important; place-items: center; font-family: var(--sans); font-size: .62rem; font-weight: 600; border-radius: 4px; color: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.3); pointer-events: none; }
+.road-shield.interstate { background: #a4402c; }
+.road-shield.state { background: #fbf8f2; color: #1e2420; border: 1px solid #1e2420; }
+.leaflet-tooltip.map-label.lake { background: #fbf8f2; padding: 3px 7px; border-radius: 6px; color: #3f6f78; }
+.leaflet-tooltip.map-label.road { background: #1e2420; color: #fbf8f2; text-shadow: none; padding: 3px 7px; border-radius: 6px; }
+.is-plan.zoomed-in .township-label, .is-plan.zoomed-in .road-shield, .is-plan.zoomed-in .county-label { display: none; }
+.map-title { font-family: var(--serif); font-size: 1.5rem; line-height: 1; color: #3f5a3f; background: rgba(251,248,242,.88); padding: 10px 14px; border-radius: 10px; }
+.map-title small { display: block; font-family: var(--sans); font-size: .62rem; letter-spacing: .22em; text-transform: uppercase; color: #6b6253; margin-top: 4px; }

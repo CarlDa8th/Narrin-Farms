@@ -42,7 +42,7 @@
   function countyMap() {
     var g = L.layerGroup();
     if (!OAK) return g;
-    var farmPlan = L.imageOverlay("assets/img/farm-ground.jpg", PLAN_BOUNDS, { pane: "farmPlanPane", attribution: "Farm plan traced from aerial imagery; county lines: U.S. Census Bureau" });
+    var farmPlan = L.imageOverlay("assets/img/farm-ground.jpg", PLAN_BOUNDS, { pane: "farmPlanPane", attribution: "Farm plan traced from aerial imagery; county lines: U.S. Census Bureau; roads, lakes and parks approximate" });
     OAK.counties.forEach(function (c) {
       var home = c.name === "Oakland";
       var poly = L.geoJSON(c.geometry, { interactive: false, style: {
@@ -52,10 +52,34 @@
       var ctr = poly.getBounds().getCenter();
       if (!home) g.addLayer(L.marker(ctr, { interactive: false, icon: L.divIcon({ className: "county-label", html: c.name + " County", iconSize: [140, 20], iconAnchor: [70, 10] }) }));
     });
-    g.addLayer(L.marker([42.575, -83.42], { interactive: false, icon: L.divIcon({ className: "county-label home", html: "Oakland County", iconSize: [220, 30], iconAnchor: [110, 15] }) }));
+    // township grid (the county is a 5 x 5 grid of six-mile survey townships)
+    var S = 42.4315, N = 42.8885, W = -83.6901, E = -83.0835;
+    for (var i = 1; i < 5; i++) {
+      var lng = W + (E - W) * i / 5, lat = S + (N - S) * i / 5;
+      g.addLayer(L.polyline([[S, lng], [N, lng]], { interactive: false, color: "#8fa384", weight: 1, dashArray: "2 6" }));
+      g.addLayer(L.polyline([[lat, W], [lat, E]], { interactive: false, color: "#8fa384", weight: 1, dashArray: "2 6" }));
+    }
+    (OAK.townships || []).forEach(function (row, r) {
+      row.forEach(function (name, c) {
+        var la = N - (N - S) * (r + 0.12) / 5, lo = W + (E - W) * (c + 0.5) / 5;
+        g.addLayer(L.marker([la, lo], { interactive: false, icon: L.divIcon({ className: "township-label", html: name + " Twp", iconSize: [160, 14], iconAnchor: [80, 7] }) }));
+      });
+    });
+    (OAK.lakes || []).forEach(function (lk) {
+      g.addLayer(L.circle([lk[1], lk[2]], { radius: lk[3], stroke: false, fillColor: "#7fa3ad", fillOpacity: 0.9 }).bindTooltip(lk[0], { className: "map-label lake" }));
+    });
     OAK.parks.forEach(function (pk) {
-      g.addLayer(L.circleMarker([pk[1], pk[2]], { radius: 7, color: "#4d6a4f", weight: 1.5, fillColor: "#86a37a", fillOpacity: 0.9 })
+      g.addLayer(L.circle([pk[1], pk[2]], { radius: pk[3] || 1500, color: "#6f8f62", weight: 1, fillColor: "#a9bf96", fillOpacity: 0.85 })
         .bindTooltip(pk[0], { className: "map-label park" }));
+    });
+    (OAK.roads || []).forEach(function (rd) {
+      var inter = rd[1] === "interstate";
+      g.addLayer(L.polyline(rd[2], { interactive: false, color: "#fbf8f2", weight: inter ? 6 : 4, opacity: 1 }));
+      var line = L.polyline(rd[2], { color: inter ? "#a4402c" : "#c6a46a", weight: inter ? 3 : 2 });
+      line.bindTooltip(rd[0], { sticky: true, className: "map-label road" });
+      g.addLayer(line);
+      var mid = rd[2][Math.floor(rd[2].length / 2)];
+      g.addLayer(L.marker(mid, { interactive: false, icon: L.divIcon({ className: "road-shield " + (inter ? "interstate" : "state"), html: rd[0], iconSize: [44, 18], iconAnchor: [22, 9] }) }));
     });
     OAK.towns.forEach(function (t) {
       var seat = t[3] === "seat";
@@ -111,16 +135,17 @@
     });
     function setMode(mode) {
       [layers.sat, layers.labels, layers.street, layers.plan].forEach(function (l) { if (map.hasLayer(l)) map.removeLayer(l); });
+      if (mapTitle && mode !== "plan") mapTitle.remove();
       if (mode === "satellite") layers.sat.addTo(map);
       if (mode === "hybrid") { layers.sat.addTo(map); layers.labels.addTo(map); }
       if (mode === "map") layers.street.addTo(map);
-      if (mode === "plan") { layers.plan.addTo(map); syncPlan(); if (currentMode !== "plan") map.fitBounds(COUNTY_BOUNDS, { padding: [20, 20] }); }
+      if (mode === "plan") { layers.plan.addTo(map); if (!scaleBar) scaleBar = L.control.scale({ imperial: true, metric: false, position: "bottomright" }).addTo(map); if (!mapTitle) { mapTitle = L.control({ position: "topleft" }); mapTitle.onAdd = function () { var d = L.DomUtil.create("div", "map-title"); d.innerHTML = "Oakland County<small>Michigan</small>"; return d; }; } mapTitle.addTo(map); syncPlan(); if (currentMode !== "plan") map.fitBounds(COUNTY_BOUNDS, { padding: [20, 20] }); }
       mapDiv.style.background = mode === "plan" ? "#e4dccb" : "";
       mapDiv.classList.toggle("is-plan", mode === "plan");
       currentMode = mode;
       layerBtns.forEach(function (x) { var on = x.getAttribute("data-layer") === mode; x.classList.toggle("active", on); x.setAttribute("aria-pressed", on ? "true" : "false"); });
     }
-    var currentMode = "hybrid";
+    var currentMode = "hybrid", scaleBar = null, mapTitle = null;
     // the farm plan image is only legible close in; hide it (and the place labels) at county scale
     function syncPlan() {
       if (!layers.plan.farmPlan) return;
