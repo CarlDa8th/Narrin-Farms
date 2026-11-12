@@ -1,9 +1,10 @@
 /* Narrin Farms — scroll-driven 3D farm tour (three.js r149)
  *
- * A stylised, hand-built model of the farm: Narrin Lake, the four homes,
- * the barn and pastures, the woods and boardwalk, the wedding lawn and the
- * fire pit. The camera glides between "chapters" as the visitor scrolls.
- * It is an illustration, not a survey — positions are artistic.
+ * The model is built from the farm's real layout (assets/js/farm-layout.js),
+ * traced from a satellite view: Narrin Lake and its wooded shoreline, the marsh
+ * to the north-east, the dock, the homes along the drive, the long barn and
+ * outbuildings, the two riding arenas and the pastures. Units are metres,
+ * x = east, z = south.
  */
 (function () {
   "use strict";
@@ -11,551 +12,335 @@
   if (!stage) return;
   var canvas = stage.querySelector(".tour-canvas");
   var tourRoot = document.querySelector(".tour");
+  var L = window.FARM_LAYOUT;
 
   function hasWebGL() {
     try { var c = document.createElement("canvas"); return !!(window.WebGLRenderingContext && (c.getContext("webgl") || c.getContext("experimental-webgl"))); }
     catch (e) { return false; }
   }
-  if (!window.THREE || !hasWebGL()) { tourRoot.classList.add("no-webgl"); return; }
+  if (!window.THREE || !L || !hasWebGL()) { tourRoot.classList.add("no-webgl"); return; }
 
   var T = window.THREE;
-  if (T.ColorManagement) T.ColorManagement.legacyMode = false; // treat hex colours as sRGB
+  if (T.ColorManagement) T.ColorManagement.legacyMode = false;
   var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var small = window.innerWidth < 760;
 
-  /* ---------- deterministic random ---------- */
-  var seed = 7;
+  var seed = 11;
   function rand() { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; }
   function rr(a, b) { return a + rand() * (b - a); }
 
+  /* ---------- layout grid lookups ---------- */
+  var G = L.grid, SW = L.size[0], SH = L.size[1];
+  function cellAt(x, z) {
+    var gx = Math.floor((x + SW / 2) / G.cell), gz = Math.floor((z + SH / 2) / G.cell);
+    if (gx < 0 || gz < 0 || gx >= G.w || gz >= G.h) return -1;
+    return gz * G.w + gx;
+  }
+  function cls(x, z) { var i = cellAt(x, z); return i < 0 ? 0 : +G.cls[i]; } // 0 woods, 1 open, 2 marsh, 3 water
+  function wat(x, z) { // smoothed water amount 0..1, bilinear
+    var fx = (x + SW / 2) / G.cell - 0.5, fz = (z + SH / 2) / G.cell - 0.5;
+    var x0 = Math.floor(fx), z0 = Math.floor(fz), tx = fx - x0, tz = fz - z0;
+    function v(a, b) { if (a < 0 || b < 0 || a >= G.w || b >= G.h) return 0; return +G.water[b * G.w + a] / 9; }
+    return (v(x0, z0) * (1 - tx) + v(x0 + 1, z0) * tx) * (1 - tz) + (v(x0, z0 + 1) * (1 - tx) + v(x0 + 1, z0 + 1) * tx) * tz;
+  }
+  function height(x, z) {
+    var n = 0.9 * Math.sin(x * 0.013) * Math.cos(z * 0.011) + 0.5 * Math.sin((x + z) * 0.021);
+    return 1.6 + n - wat(x, z) * 4.6;
+  }
+
   /* ---------- renderer / scene ---------- */
   var renderer = new T.WebGLRenderer({ canvas: canvas, antialias: true, powerPreference: "high-performance" });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.75));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, small ? 1.5 : 1.75));
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = T.PCFSoftShadowMap;
   renderer.outputEncoding = T.sRGBEncoding;
   renderer.toneMapping = T.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.05;
 
   var scene = new T.Scene();
-  var DAY_SKY = new T.Color("#bcd3d6");
-  var DUSK_SKY = new T.Color("#e7a77d");
-  var NIGHT_SKY = new T.Color("#3d4058");
+  var DAY_SKY = new T.Color("#bcd2d8"), DUSK_SKY = new T.Color("#e5a57e"), NIGHT_SKY = new T.Color("#3d4058");
   scene.background = DAY_SKY.clone();
-  scene.fog = new T.Fog(DAY_SKY.clone(), 320, 900);
+  scene.fog = new T.Fog(DAY_SKY.clone(), 700, 1700);
+  var camera = new T.PerspectiveCamera(42, 1, 1, 4000);
 
-  var camera = new T.PerspectiveCamera(42, 1, 1, 2000);
-
-  var hemi = new T.HemisphereLight("#f4efe0", "#41553f", 0.75);
+  var hemi = new T.HemisphereLight("#f4efe0", "#3b4a35", 0.8);
   scene.add(hemi);
-  var sun = new T.DirectionalLight("#fff1d6", 1.6);
-  sun.position.set(160, 200, 90);
+  var sun = new T.DirectionalLight("#fff1d6", 1.7);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
-  var sc = sun.shadow.camera;
-  sc.left = -230; sc.right = 230; sc.top = 230; sc.bottom = -230; sc.near = 10; sc.far = 600;
-  sun.shadow.bias = -0.0005;
-  scene.add(sun);
+  sun.shadow.mapSize.set(small ? 1024 : 2048, small ? 1024 : 2048);
+  var sc = sun.shadow.camera; sc.left = -480; sc.right = 480; sc.top = 480; sc.bottom = -480; sc.near = 10; sc.far = 1500;
+  sun.shadow.bias = -0.0006;
+  scene.add(sun); scene.add(sun.target);
 
-  /* ---------- terrain ---------- */
-  var LAKE = { x: 0, z: 0, rx: 62, rz: 40 };
-  function lakeD(x, z) { var dx = (x - LAKE.x) / LAKE.rx, dz = (z - LAKE.z) / LAKE.rz; return Math.sqrt(dx * dx + dz * dz); }
-  function smooth(a, b, v) { var t = Math.min(1, Math.max(0, (v - a) / (b - a))); return t * t * (3 - 2 * t); }
-  function height(x, z) {
-    var base = 4.6 + 2.4 * Math.sin(x * 0.021) * Math.cos(z * 0.017) + 1.4 * Math.sin((x - z) * 0.011) + 0.6 * Math.sin(x * 0.07 + z * 0.05);
-    // the Clubhouse sits on a rise above the lake
-    var hx = x - 12, hz = z + 72; base += 7 * Math.exp(-(hx * hx + hz * hz) / 1600);
-    // rolling ground out west in the woods
-    base += 3 * smooth(-60, -200, x) * Math.sin(z * 0.03);
-    var d = lakeD(x, z);
-    return -3 + (base + 3) * smooth(0.92, 1.55, d);
-  }
-  var PASTURE = { x0: 72, x1: 165, z0: 18, z1: 108 };
-  function inPasture(x, z, pad) { pad = pad || 0; return x > PASTURE.x0 - pad && x < PASTURE.x1 + pad && z > PASTURE.z0 - pad && z < PASTURE.z1 + pad; }
-
-  (function buildGround() {
-    var size = 900, seg = 180;
-    var g = new T.PlaneGeometry(size, size, seg, seg);
+  /* ---------- ground (painted from the satellite trace) ---------- */
+  (function () {
+    var g = new T.PlaneGeometry(SW, SH, G.w, G.h);
     g.rotateX(-Math.PI / 2);
     var pos = g.attributes.position;
-    var colors = new Float32Array(pos.count * 3);
-    var c = new T.Color();
-    var grass1 = new T.Color("#6f8f4e"), grass2 = new T.Color("#8ea35c"), forest = new T.Color("#4a6238"), sand = new T.Color("#c2b48a"), bed = new T.Color("#4f5f48"), past = new T.Color("#9bb066");
-    for (var i = 0; i < pos.count; i++) {
-      var x = pos.getX(i), z = pos.getZ(i);
-      var y = height(x, z); pos.setY(i, y);
-      var d = lakeD(x, z);
-      var n = 0.5 + 0.5 * Math.sin(x * 0.09) * Math.cos(z * 0.08);
-      c.copy(grass1).lerp(grass2, n);
-      if (x < -55 || z > 110 || Math.hypot(x, z) > 230) c.lerp(forest, 0.6);
-      if (inPasture(x, z)) c.copy(past).lerp(grass2, n * 0.4);
-      if (d < 1.12) c.lerp(sand, smooth(1.12, 0.98, d));
-      if (d < 0.98) c.copy(bed);
-      colors[i * 3] = c.r; colors[i * 3 + 1] = c.g; colors[i * 3 + 2] = c.b;
-    }
-    g.setAttribute("color", new T.BufferAttribute(colors, 3));
+    for (var i = 0; i < pos.count; i++) pos.setY(i, height(pos.getX(i), pos.getZ(i)));
     g.computeVertexNormals();
-    var m = new T.Mesh(g, new T.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0 }));
-    m.receiveShadow = true;
-    scene.add(m);
+    var tex = new T.TextureLoader().load("assets/img/farm-ground.jpg");
+    tex.encoding = T.sRGBEncoding;
+    tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    var m = new T.Mesh(g, new T.MeshStandardMaterial({ map: tex, roughness: 0.95 }));
+    m.receiveShadow = true; scene.add(m);
+    // the woods continue beyond the traced area
+    var out = new T.Mesh(new T.RingGeometry(Math.min(SW, SH) * 0.5, 2600, 64, 1), new T.MeshStandardMaterial({ color: "#3d5230", roughness: 1 }));
+    out.rotation.x = -Math.PI / 2; out.position.y = 1.3; out.receiveShadow = true; scene.add(out);
+    var corners = new T.Mesh(new T.PlaneGeometry(SW + 2, SH + 2), new T.MeshStandardMaterial({ color: "#3d5230", roughness: 1 }));
+    corners.rotation.x = -Math.PI / 2; corners.position.y = 0.2; scene.add(corners);
   })();
 
-  /* ---------- water ---------- */
-  var water;
-  (function buildLake() {
-    var shape = new T.Shape();
-    shape.absellipse(0, 0, LAKE.rx * 1.03, LAKE.rz * 1.03, 0, Math.PI * 2, false, 0);
-    var g = new T.ShapeGeometry(shape, 96);
-    g.rotateX(-Math.PI / 2);
-    water = new T.Mesh(g, new T.MeshStandardMaterial({ color: "#3b6b72", roughness: 0.08, metalness: 0.55, transparent: true, opacity: 0.92 }));
-    water.position.set(LAKE.x, 0.35, LAKE.z);
-    water.receiveShadow = true;
-    scene.add(water);
-    // soft glints that drift across the surface
-    var glintGeo = new T.BufferGeometry();
-    var gp = [];
-    for (var i = 0; i < 160; i++) {
-      var a = rand() * Math.PI * 2, r = Math.sqrt(rand()) * 0.95;
-      gp.push(Math.cos(a) * r * LAKE.rx, 0.5, Math.sin(a) * r * LAKE.rz);
+  /* ---------- Narrin Lake ---------- */
+  var lakeMinX = 1e9, lakeMaxX = -1e9, lakeMinZ = 1e9, lakeMaxZ = -1e9, waterCells = [];
+  for (var gz = 0; gz < G.h; gz++) for (var gx = 0; gx < G.w; gx++) {
+    if (G.cls[gz * G.w + gx] === "3") {
+      var wx = -SW / 2 + (gx + 0.5) * G.cell, wz = -SH / 2 + (gz + 0.5) * G.cell;
+      waterCells.push([wx, wz]);
+      lakeMinX = Math.min(lakeMinX, wx); lakeMaxX = Math.max(lakeMaxX, wx); lakeMinZ = Math.min(lakeMinZ, wz); lakeMaxZ = Math.max(lakeMaxZ, wz);
     }
-    glintGeo.setAttribute("position", new T.Float32BufferAttribute(gp, 3));
-    var glints = new T.Points(glintGeo, new T.PointsMaterial({ color: "#fff6dc", size: 0.9, transparent: true, opacity: 0.55, depthWrite: false }));
-    glints.name = "glints";
+  }
+  var water = new T.Mesh(new T.PlaneGeometry(lakeMaxX - lakeMinX + 60, lakeMaxZ - lakeMinZ + 60),
+    new T.MeshStandardMaterial({ color: "#2d4f58", roughness: 0.1, metalness: 0.5 }));
+  water.rotation.x = -Math.PI / 2;
+  water.position.set((lakeMinX + lakeMaxX) / 2, 0.3, (lakeMinZ + lakeMaxZ) / 2);
+  water.receiveShadow = true; scene.add(water);
+  var glints;
+  (function () {
+    var gp = [];
+    for (var i = 0; i < 260; i++) { var c = waterCells[Math.floor(rand() * waterCells.length)]; gp.push(c[0] + rr(-2, 2), 0.5, c[1] + rr(-2, 2)); }
+    var g = new T.BufferGeometry(); g.setAttribute("position", new T.Float32BufferAttribute(gp, 3));
+    glints = new T.Points(g, new T.PointsMaterial({ color: "#fff6dc", size: 1.4, transparent: true, opacity: 0.5, depthWrite: false }));
     scene.add(glints);
   })();
 
-  /* ---------- material helpers ---------- */
+  /* ---------- helpers ---------- */
   var MAT = {};
   function mat(color, opts) {
     var key = color + JSON.stringify(opts || {});
-    if (!MAT[key]) MAT[key] = new T.MeshStandardMaterial(Object.assign({ color: color, roughness: 0.85, metalness: 0 }, opts || {}));
+    if (!MAT[key]) MAT[key] = new T.MeshStandardMaterial(Object.assign({ color: color, roughness: 0.85 }, opts || {}));
     return MAT[key];
   }
-  function glow(color, intensity) { return mat(color, { emissive: color, emissiveIntensity: intensity || 1, roughness: 0.4 }); }
   var windowMats = [];
-  function windowMat() { var m = new T.MeshStandardMaterial({ color: "#2a2a24", emissive: "#ffc77a", emissiveIntensity: 0.15, roughness: 0.3 }); windowMats.push(m); return m; }
-  var WIN = windowMat();
-
+  function winMat() { var m = new T.MeshStandardMaterial({ color: "#2a2a24", emissive: "#ffc77a", emissiveIntensity: 0.1, roughness: 0.3 }); windowMats.push(m); return m; }
+  var WIN = winMat();
   function box(w, h, d, m, x, y, z) {
-    var mesh = new T.Mesh(new T.BoxGeometry(w, h, d), m);
-    mesh.position.set(x || 0, y || 0, z || 0);
-    mesh.castShadow = true; mesh.receiveShadow = true;
-    return mesh;
+    var b = new T.Mesh(new T.BoxGeometry(w, h, d), m); b.position.set(x || 0, y || 0, z || 0);
+    b.castShadow = true; b.receiveShadow = true; return b;
   }
-  // a gable roof / prism: triangle (width w, rise h) extruded along depth d
-  function prism(w, h, d, m, overhang) {
-    overhang = overhang || 0;
-    var s = new T.Shape();
-    s.moveTo(-w / 2 - overhang, 0); s.lineTo(w / 2 + overhang, 0); s.lineTo(0, h); s.lineTo(-w / 2 - overhang, 0);
-    var g = new T.ExtrudeGeometry(s, { depth: d, bevelEnabled: false });
-    g.translate(0, 0, -d / 2);
-    var mesh = new T.Mesh(g, m); mesh.castShadow = true; mesh.receiveShadow = true;
-    return mesh;
+  function prism(w, h, d, m) {
+    var s = new T.Shape(); s.moveTo(-w / 2, 0); s.lineTo(w / 2, 0); s.lineTo(0, h); s.lineTo(-w / 2, 0);
+    var g = new T.ExtrudeGeometry(s, { depth: d, bevelEnabled: false }); g.translate(0, 0, -d / 2);
+    var p = new T.Mesh(g, m); p.castShadow = true; p.receiveShadow = true; return p;
   }
-  function place(group, x, z, rotY, yOffset) {
-    group.position.set(x, height(x, z) + (yOffset || 0), z);
-    group.rotation.y = rotY || 0;
-    scene.add(group);
-    return group;
-  }
-  function foundation(w, d, m) { return box(w, 6, d, m || mat("#6e675c"), 0, -2.6, 0); }
+  var reserved = []; // [x, z, r] — keep trees off buildings, docks and roads
 
-  /* ---------- the four homes ---------- */
-  var anchors = {};
-
-  // The Clubhouse — on the hill, board-and-batten grey with the red gable and pergola
-  (function () {
+  /* ---------- buildings (real footprints) ---------- */
+  L.buildings.forEach(function (b) {
     var g = new T.Group();
-    g.add(foundation(26, 13));
-    g.add(box(18, 6, 11, mat("#6f7468"), -2, 3, 0));
-    var roof = prism(12.4, 4.6, 19, mat("#4d5152"), 0.6); roof.rotation.y = Math.PI / 2; roof.position.set(-2, 6, 0); g.add(roof);
-    g.add(box(7.5, 7.2, 11.6, mat("#93402f"), 9, 3.6, 0));
-    var r2 = prism(7.5, 4, 12.4, mat("#4d5152"), 0.6); r2.position.set(9, 7.2, 0); g.add(r2);
-    // windows facing the lake (+z)
-    for (var i = -3; i <= 1; i++) g.add(box(2.2, 2.4, 0.3, WIN, -2 + i * 3.4 + 2, 3.4, 5.6));
-    g.add(box(2.4, 3.4, 0.3, WIN, 9, 3.6, 5.9));
-    // pergola
-    var wood = mat("#8a6844");
-    [[-14, 3], [-14, -3], [-19, 3], [-19, -3]].forEach(function (p) { g.add(box(0.5, 6, 0.5, wood, p[0], 3, p[1])); });
-    for (var s = -4; s <= 4; s += 1.2) g.add(box(6.6, 0.3, 0.35, wood, -16.5, 6.1, s));
-    g.add(box(5.4, 0.2, 7, mat("#a99a83"), -16.5, 0.1, 0));
-    // stone patio + red Adirondack chairs around the fire pit
-    g.add(box(14, 0.4, 10, mat("#b9ae9c"), 4, 0.2, 13));
-    var pit = new T.Mesh(new T.CylinderGeometry(1.4, 1.6, 0.9, 18), mat("#5a4c44")); pit.position.set(4, 0.8, 13.5); pit.castShadow = true; g.add(pit);
-    var red = mat("#b23a2a");
-    for (var k = 0; k < 5; k++) {
-      var a = (k / 5) * Math.PI * 2 + 0.3;
-      var ch = new T.Group();
-      ch.add(box(1.4, 0.4, 1.4, red, 0, 0.9, 0));
-      var back = box(1.4, 1.8, 0.3, red, 0, 1.7, -0.75); back.rotation.x = -0.35; ch.add(back);
-      ch.position.set(4 + Math.cos(a) * 4, 0, 13.5 + Math.sin(a) * 4);
-      ch.lookAt(4, 0, 13.5);
-      g.add(ch);
+    var w = b.w, d = b.d;
+    if (b.kind === "barn") {
+      g.add(box(w, 7, d, mat("#b7b3aa"), 0, 2.5, 0));
+      var r = prism(d + 1, 4.5, w + 1, mat("#e3e1dc")); r.rotation.y = Math.PI / 2; r.position.y = 6; g.add(r);
+      for (var i = -3; i <= 3; i++) g.add(box(2.4, 1.4, 0.2, WIN, i * (w / 8), 4.5, d / 2 + 0.05));
+      g.add(box(4, 5, 0.3, mat("#6b6255"), w / 2 - 6, 2.5, d / 2 + 0.1));
+    } else if (b.kind === "house") {
+      g.add(box(w, 5, d, mat("#6f7468"), 0, 2, 0));
+      var rh = prism(d + 1.2, Math.min(5, d * 0.45), w + 1.2, mat("#585c5d")); rh.rotation.y = Math.PI / 2; rh.position.y = 4.5; g.add(rh);
+      g.add(box(w * 0.18, 1.8, 0.2, WIN, -w * 0.25, 2.6, d / 2 + 0.05));
+      g.add(box(w * 0.18, 1.8, 0.2, WIN, w * 0.2, 2.6, d / 2 + 0.05));
+      g.add(box(w * 0.18, 1.8, 0.2, WIN, 0, 2.6, -d / 2 - 0.05));
+    } else {
+      g.add(box(w, 4.5, d, mat("#a9a59b"), 0, 1.8, 0));
+      var rs = prism(d + 0.8, Math.min(3, d * 0.35), w + 0.8, mat("#e0ddd6")); rs.rotation.y = Math.PI / 2; rs.position.y = 4; g.add(rs);
     }
-    // evergreens by the porch
-    place(g, 12, -72, Math.PI * 0.03, 0);
-    anchors.clubhouse = new T.Vector3(12, height(12, -72) + 8, -72);
-    anchors.fire = new T.Vector3(16, height(12, -72) + 2, -58.5);
-  })();
+    g.position.set(b.x, height(b.x, b.z), b.z);
+    g.rotation.y = b.rot || 0;
+    scene.add(g);
+    reserved.push([b.x, b.z, Math.max(w, d) * 0.6 + 4]);
+  });
+  var P = L.points;
 
-  // The Lodge — Tudor-style gables, hedges and stairs
+  /* ---------- fences: arenas, pastures ---------- */
   (function () {
-    var g = new T.Group();
-    g.add(foundation(26, 18));
-    var body = mat("#6b5848"), trim = mat("#3d3129"), roofM = mat("#55594f");
-    g.add(box(22, 6.5, 13, body, 0, 3.25, 0));
-    var roof = prism(14, 5, 23.5, roofM, 0.6); roof.rotation.y = Math.PI / 2; roof.position.y = 6.5; g.add(roof);
-    [-6, 4].forEach(function (x) {
-      g.add(box(7, 7, 3, body, x, 3.5, 7.5));
-      var gab = prism(7.6, 5.4, 3.8, mat("#7c6a56"), 0.3); gab.position.set(x, 7, 7.6); g.add(gab);
-      g.add(box(1.8, 2.2, 0.3, WIN, x, 4.5, 9.1));
-      g.add(box(0.3, 7, 0.3, trim, x - 3.4, 3.5, 9.05)); g.add(box(0.3, 7, 0.3, trim, x + 3.4, 3.5, 9.05));
-    });
-    g.add(box(3.2, 2.2, 0.3, WIN, -0.8, 3.2, 6.6));
-    g.add(box(2.4, 2, 0.3, WIN, 9.5, 3.2, 6.6));
-    var hedge = mat("#3f5a33");
-    for (var i = 0; i < 4; i++) { g.add(box(20, 1.4 + i * 0.3, 1.6, hedge, 0, 0.7 - i * 0.6, 11 + i * 2.6)); }
-    g.add(box(3, 0.4, 10, mat("#8b6a49"), 12.5, -0.5, 13));
-    place(g, -82, -40, 1.1, 0);
-    anchors.lodge = new T.Vector3(-82, height(-82, -40) + 8, -40);
-  })();
-
-  // The Grooms — black A-frame with string lights and a deck
-  var stringBulbs = [];
-  (function () {
-    var g = new T.Group();
-    g.add(foundation(12, 14));
-    var aframe = prism(10, 11, 10, mat("#2b2d2b"), 0.4); g.add(aframe);
-    var shingles = prism(10.9, 11.9, 10.4, mat("#6a4a37"), 0); shingles.scale.set(1, 1, 1); shingles.position.y = -0.3; g.add(shingles);
-    // front face
-    var face = new T.Shape(); face.moveTo(-4.6, 0); face.lineTo(4.6, 0); face.lineTo(0, 10.1); face.lineTo(-4.6, 0);
-    var faceMesh = new T.Mesh(new T.ShapeGeometry(face), mat("#2f3330")); faceMesh.position.z = 5.25; g.add(faceMesh);
-    var tri = new T.Shape(); tri.moveTo(-1.2, 6.6); tri.lineTo(1.2, 6.6); tri.lineTo(0, 8.6); tri.lineTo(-1.2, 6.6);
-    var triMesh = new T.Mesh(new T.ShapeGeometry(tri), WIN); triMesh.position.z = 5.3; g.add(triMesh);
-    g.add(box(3, 2, 0.2, WIN, -1.6, 2.8, 5.32));
-    g.add(box(1.4, 3, 0.2, mat("#1d201e"), 2.3, 1.5, 5.32));
-    // deck, table & umbrella
-    g.add(box(12, 0.5, 8, mat("#8f7c63"), 0, 0.25, 10));
-    g.add(box(2.6, 0.2, 1.6, mat("#222"), -2.5, 2, 11)); g.add(box(0.2, 2, 0.2, mat("#222"), -2.5, 1, 11));
-    var umb = new T.Mesh(new T.ConeGeometry(3.4, 1.2, 8), mat("#6b6656")); umb.position.set(-2.5, 4.4, 11); umb.castShadow = true; g.add(umb);
-    g.add(box(0.15, 4, 0.15, mat("#555"), -2.5, 2.4, 11));
-    // string lights: a sagging line from the peak to a post
-    g.add(box(0.3, 6, 0.3, mat("#3a3a3a"), 5.5, 3, 13.5));
-    var bulbMat = glow("#ffd89a", 0.6);
-    for (var i = 0; i <= 14; i++) {
-      var t = i / 14;
-      var x = T.MathUtils.lerp(0, 5.5, t), z = T.MathUtils.lerp(5.4, 13.5, t), y = T.MathUtils.lerp(10, 6, t) - Math.sin(t * Math.PI) * 1.4;
-      var b = new T.Mesh(new T.SphereGeometry(0.2, 8, 6), bulbMat); b.position.set(x, y, z); g.add(b); stringBulbs.push(b);
-    }
-    place(g, 72, -42, -1.0, 0);
-    anchors.grooms = new T.Vector3(72, height(72, -42) + 7, -42);
-  })();
-
-  // The Woods — log cabin tucked into the trees
-  (function () {
-    var g = new T.Group();
-    g.add(foundation(16, 13));
-    var logs = mat("#7a5a3d");
-    for (var i = 0; i < 6; i++) g.add(box(13, 0.85, 10, i % 2 ? logs : mat("#6d5036"), 0, 0.45 + i * 0.85, 0));
-    var roof = prism(11.6, 4.2, 14.4, mat("#3e4a3a"), 0.6); roof.rotation.y = Math.PI / 2; roof.position.y = 5.1; g.add(roof);
-    g.add(box(1.4, 6, 1.4, mat("#7f7468"), 4, 7, -2));
-    g.add(box(2.2, 2, 0.3, WIN, -3, 2.8, 5.05)); g.add(box(2.2, 2, 0.3, WIN, 3, 2.8, 5.05));
-    g.add(box(13, 0.4, 4, mat("#8d7357"), 0, 0.2, 7));
-    // hot tub
-    var tub = new T.Mesh(new T.CylinderGeometry(1.8, 1.8, 1.2, 20), mat("#5d4632")); tub.position.set(-8.5, 0.6, 5); tub.castShadow = true; g.add(tub);
-    var tw = new T.Mesh(new T.CylinderGeometry(1.55, 1.55, 0.1, 20), glow("#6fd3d8", 0.35)); tw.position.set(-8.5, 1.2, 5); g.add(tw);
-    place(g, -112, 68, 0.6, 0);
-    anchors.woods = new T.Vector3(-112, height(-112, 68) + 6, 68);
-  })();
-
-  /* ---------- barn, pasture & fence ---------- */
-  (function () {
-    var g = new T.Group();
-    g.add(foundation(18, 28));
-    var red = mat("#9a3424"), white = mat("#efe8da");
-    g.add(box(16, 9, 26, red, 0, 4.5, 0));
-    var roof = prism(17.5, 6.5, 27, mat("#4b4f50"), 0.4); roof.position.y = 9; g.add(roof);
-    var gable = prism(16, 6.2, 0.2, red, 0); gable.position.set(0, 9, 13.05); g.add(gable);
-    g.add(box(6, 6.5, 0.3, mat("#7d2b1d"), 0, 3.25, 13.1));
-    var x1 = box(0.35, 8.6, 0.2, white, 0, 3.25, 13.3); x1.rotation.z = 0.75; g.add(x1);
-    var x2 = box(0.35, 8.6, 0.2, white, 0, 3.25, 13.3); x2.rotation.z = -0.75; g.add(x2);
-    g.add(box(6.4, 0.35, 0.25, white, 0, 6.5, 13.3)); g.add(box(0.35, 6.5, 0.25, white, -3.1, 3.25, 13.3)); g.add(box(0.35, 6.5, 0.25, white, 3.1, 3.25, 13.3));
-    g.add(box(2.2, 2.2, 0.3, WIN, 0, 11, 13.1));
-    // run-in shed + hay
-    g.add(box(10, 4.5, 6, mat("#8b6a49"), 15, 2.25, 6));
-    var shedRoof = box(11, 0.4, 7.5, mat("#4b4f50"), 15, 4.8, 6); shedRoof.rotation.x = 0.12; g.add(shedRoof);
-    for (var h = 0; h < 3; h++) { var bale = new T.Mesh(new T.CylinderGeometry(1.2, 1.2, 1.8, 14), mat("#d6b56a")); bale.rotation.z = Math.PI / 2; bale.position.set(-11, 1.2, -6 + h * 3); bale.castShadow = true; g.add(bale); }
-    place(g, 182, 48, -Math.PI / 2, 0);
-    anchors.barn = new T.Vector3(182, height(182, 48) + 9, 48);
-
-    // fence posts and rails around the pasture
-    var postGeo = new T.BoxGeometry(0.45, 2.6, 0.45);
-    var railGeo = new T.BoxGeometry(1, 0.22, 0.18);
-    var fenceMat = mat("#e9e1cf");
     var posts = [], rails = [];
-    function edge(ax, az, bx, bz) {
-      var len = Math.hypot(bx - ax, bz - az), n = Math.ceil(len / 6);
+    function seg(a, b, spacing) {
+      var len = Math.hypot(b[0] - a[0], b[1] - a[1]), n = Math.max(1, Math.round(len / spacing));
       for (var i = 0; i <= n; i++) {
-        var t = i / n, x = ax + (bx - ax) * t, z = az + (bz - az) * t;
-        posts.push([x, height(x, z) + 1.3, z]);
+        var t = i / n, x = a[0] + (b[0] - a[0]) * t, z = a[1] + (b[1] - a[1]) * t;
+        posts.push([x, height(x, z) + 0.7, z]);
         if (i < n) {
-          var t2 = (i + 1) / n, x2 = ax + (bx - ax) * t2, z2 = az + (bz - az) * t2;
-          var y1 = height(x, z), y2 = height(x2, z2);
-          [1.1, 2.1].forEach(function (hh) { rails.push({ x: (x + x2) / 2, y: (y1 + y2) / 2 + hh, z: (z + z2) / 2, len: Math.hypot(x2 - x, z2 - z), ry: -Math.atan2(z2 - z, x2 - x), rz: Math.atan2(y2 - y1, Math.hypot(x2 - x, z2 - z)) }); });
+          var t2 = (i + 1) / n, x2 = a[0] + (b[0] - a[0]) * t2, z2 = a[1] + (b[1] - a[1]) * t2;
+          [0.7, 1.3].forEach(function (hh) {
+            rails.push({ x: (x + x2) / 2, y: (height(x, z) + height(x2, z2)) / 2 + hh, z: (z + z2) / 2, len: Math.hypot(x2 - x, z2 - z), ry: -Math.atan2(z2 - z, x2 - x) });
+          });
         }
       }
     }
-    var P = PASTURE;
-    edge(P.x0, P.z0, P.x1, P.z0); edge(P.x1, P.z0, P.x1, P.z1); edge(P.x1, P.z1, P.x0, P.z1); edge(P.x0, P.z1, P.x0, P.z0);
-    // cross fence splitting two paddocks
-    edge(P.x0 + 48, P.z0, P.x0 + 48, P.z1);
-    var postMesh = new T.InstancedMesh(postGeo, fenceMat, posts.length);
-    var railMesh = new T.InstancedMesh(railGeo, fenceMat, rails.length);
-    var m4 = new T.Matrix4(), q = new T.Quaternion(), e = new T.Euler(), s = new T.Vector3(), p = new T.Vector3();
-    posts.forEach(function (pp, i) { m4.makeTranslation(pp[0], pp[1], pp[2]); postMesh.setMatrixAt(i, m4); });
-    rails.forEach(function (r, i) { e.set(0, r.ry, r.rz, "YXZ"); q.setFromEuler(e); s.set(r.len, 1, 1); p.set(r.x, r.y, r.z); m4.compose(p, q, s); railMesh.setMatrixAt(i, m4); });
-    postMesh.castShadow = railMesh.castShadow = true;
-    scene.add(postMesh); scene.add(railMesh);
+    L.fences.forEach(function (line) { for (var i = 0; i < line.length - 1; i++) seg(line[i], line[i + 1], 3.5); });
+    L.arenas.forEach(function (a) {
+      var x0 = Math.min(a[0], a[2]), x1 = Math.max(a[0], a[2]), z0 = Math.min(a[1], a[3]), z1 = Math.max(a[1], a[3]);
+      seg([x0, z0], [x1, z0], 3); seg([x1, z0], [x1, z1], 3); seg([x1, z1], [x0, z1], 3); seg([x0, z1], [x0, z0], 3);
+      reserved.push([(x0 + x1) / 2, (z0 + z1) / 2, Math.max(x1 - x0, z1 - z0) * 0.6]);
+    });
+    var fm = mat("#f1ece0");
+    var pm = new T.InstancedMesh(new T.BoxGeometry(0.25, 1.5, 0.25), fm, posts.length);
+    var rm = new T.InstancedMesh(new T.BoxGeometry(1, 0.12, 0.1), fm, rails.length);
+    var m4 = new T.Matrix4(), q = new T.Quaternion(), s = new T.Vector3(), p = new T.Vector3(), up = new T.Vector3(0, 1, 0);
+    posts.forEach(function (pp, i) { m4.makeTranslation(pp[0], pp[1], pp[2]); pm.setMatrixAt(i, m4); });
+    rails.forEach(function (r, i) { q.setFromAxisAngle(up, r.ry); s.set(r.len, 1, 1); p.set(r.x, r.y, r.z); m4.compose(p, q, s); rm.setMatrixAt(i, m4); });
+    pm.castShadow = rm.castShadow = true; scene.add(pm); scene.add(rm);
   })();
 
-  /* ---------- animals ---------- */
-  var animals = [];
-  function quadruped(o) {
-    var g = new T.Group();
-    var body = mat(o.color), dark = mat(o.legs || "#2a2420");
-    var L = o.len, H = o.h;
-    g.add(box(L, H * 0.42, H * 0.36, body, 0, H * 0.75, 0));
-    var legs = [];
-    [[L * 0.36, H * 0.13], [L * 0.36, -H * 0.13], [-L * 0.36, H * 0.13], [-L * 0.36, -H * 0.13]].forEach(function (lp) {
-      var leg = box(H * 0.1, H * 0.56, H * 0.1, dark, lp[0], H * 0.28, lp[1]); g.add(leg); legs.push(leg);
-    });
-    var neck = box(H * 0.18, H * o.neck, H * 0.2, body, L * 0.5, H * (0.75 + o.neck / 2.4), 0); neck.rotation.z = -0.5; g.add(neck);
-    var head = box(H * o.headLen, H * 0.2, H * 0.2, o.face ? mat(o.face) : body, L * 0.5 + H * 0.28, H * (0.82 + o.neck * 0.62), 0); head.rotation.z = -0.35; g.add(head);
-    if (o.horns) {
-      var horn = box(0.18, 0.18, H * 1.25, mat("#e7dcc3"), L * 0.55 + H * 0.12, H * (0.92 + o.neck * 0.6), 0); g.add(horn);
-      var tip1 = box(0.16, 0.6, 0.16, mat("#e7dcc3"), L * 0.55 + H * 0.12, H * (0.92 + o.neck * 0.6) + 0.3, H * 0.62); g.add(tip1);
-      var tip2 = tip1.clone(); tip2.position.z = -H * 0.62; g.add(tip2);
+  /* ---------- dock & boardwalk ---------- */
+  function planks(line, width, color, y) {
+    var pts = [];
+    for (var i = 0; i < line.length - 1; i++) {
+      var a = line[i], b = line[i + 1], len = Math.hypot(b[0] - a[0], b[1] - a[1]), n = Math.ceil(len / 0.9);
+      for (var k = 0; k < n; k++) { var t = k / n; pts.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, Math.atan2(b[0] - a[0], b[1] - a[1])]); }
+      reserved.push([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, len / 2 + 9]);
     }
-    if (o.tail) { var tail = box(0.18, H * 0.4, 0.18, dark, -L * 0.52, H * 0.66, 0); tail.rotation.z = 0.35; g.add(tail); }
-    if (o.ears) { g.add(box(0.15, H * 0.22, 0.15, body, L * 0.5 + H * 0.12, H * (1.02 + o.neck * 0.62), 0.25)); g.add(box(0.15, H * 0.22, 0.15, body, L * 0.5 + H * 0.12, H * (1.02 + o.neck * 0.62), -0.25)); }
-    g.userData.legs = legs;
-    return g;
-  }
-  function addAnimal(o, x, z, area) {
-    var a = quadruped(o);
-    a.position.set(x, height(x, z), z);
-    a.rotation.y = rand() * Math.PI * 2;
-    scene.add(a);
-    animals.push({ obj: a, area: area, target: new T.Vector3(x, 0, z), speed: o.speed || 1.6, wait: rand() * 4, phase: rand() * 10 });
-  }
-  var paddockA = { x0: PASTURE.x0 + 5, x1: PASTURE.x0 + 44, z0: PASTURE.z0 + 5, z1: PASTURE.z1 - 5 };
-  var paddockB = { x0: PASTURE.x0 + 53, x1: PASTURE.x1 - 5, z0: PASTURE.z0 + 5, z1: PASTURE.z1 - 5 };
-  var horse = function (c, legs, face) { return { color: c, legs: legs, face: face, len: 4.2, h: 4.2, neck: 0.55, headLen: 0.55, tail: true, ears: true, speed: 2.2 }; };
-  addAnimal(horse("#6b3f24", "#2a1a12"), 90, 40, paddockA);
-  addAnimal(horse("#efe8dc", "#cfc6b6"), 100, 70, paddockA);
-  addAnimal(horse("#2a2420", "#1a1512", "#e8e0d2"), 85, 90, paddockA);
-  addAnimal(horse("#8f5a34", "#2a1a12", "#efe8dc"), 105, 55, paddockA);
-  addAnimal(horse("#b2a08c", "#4a3e33"), 140, 35, paddockB);
-  // Texas longhorn & a Holstein, donkeys and sheep
-  addAnimal({ color: "#9aa0a3", legs: "#6a6f72", len: 4.6, h: 3.6, neck: 0.25, headLen: 0.5, horns: true, tail: true, speed: 0.9 }, 135, 70, paddockB);
-  addAnimal({ color: "#1f1f1f", legs: "#efe8dc", face: "#efe8dc", len: 4.3, h: 3.4, neck: 0.25, headLen: 0.5, tail: true, speed: 0.9 }, 150, 90, paddockB);
-  addAnimal({ color: "#77706a", legs: "#3a3632", face: "#c9c1b6", len: 2.8, h: 2.8, neck: 0.45, headLen: 0.55, ears: true, tail: true, speed: 1.2 }, 128, 95, paddockB);
-  addAnimal({ color: "#8a8178", legs: "#3a3632", face: "#d6cec2", len: 2.7, h: 2.7, neck: 0.45, headLen: 0.55, ears: true, tail: true, speed: 1.2 }, 145, 50, paddockB);
-  for (var sh = 0; sh < 4; sh++) addAnimal({ color: "#f1ece2", legs: "#2a2420", face: "#2a2420", len: 2, h: 1.9, neck: 0.2, headLen: 0.45, speed: 0.8 }, rr(130, 155), rr(30, 60), paddockB);
-
-  /* ---------- lake life: dock, kayaks, paddlers ---------- */
-  var kayaks = [];
-  (function () {
-    var wood = mat("#8c7558");
-    var dock = new T.Group();
-    dock.add(box(3.2, 0.4, 16, wood, 0, 0.9, 0));
-    dock.add(box(9, 0.4, 3.2, wood, 0, 0.9, 8));
-    for (var i = -6; i <= 8; i += 4) { dock.add(box(0.4, 3, 0.4, wood, -1.4, -0.4, i)); dock.add(box(0.4, 3, 0.4, wood, 1.4, -0.4, i)); }
-    dock.position.set(18, 0, -38); scene.add(dock);
-    // kayak rack on shore
-    var rack = new T.Group();
-    rack.add(box(0.4, 4, 0.4, wood, -3, 2, 0)); rack.add(box(0.4, 4, 0.4, wood, 3, 2, 0));
-    for (var r = 0; r < 3; r++) {
-      rack.add(box(7, 0.25, 0.4, wood, 0, 1 + r * 1.2, 0));
-      var k = new T.Mesh(new T.SphereGeometry(1, 14, 8), mat("#eef1f0")); k.scale.set(0.7, 0.35, 3.6); k.position.set(0, 1.4 + r * 1.2, 0.2); k.rotation.y = Math.PI / 2; k.castShadow = true; rack.add(k);
-    }
-    rack.position.set(32, height(32, -44), -44); rack.rotation.y = 0.2; scene.add(rack);
-
-    function kayak(color) {
-      var g = new T.Group();
-      var hull = new T.Mesh(new T.SphereGeometry(1, 16, 10), mat(color, { roughness: 0.5 })); hull.scale.set(3.4, 0.45, 0.75); hull.castShadow = true; g.add(hull);
-      var person = box(0.7, 1.4, 0.7, mat("#2d3a44"), 0, 0.9, 0); g.add(person);
-      var head = new T.Mesh(new T.SphereGeometry(0.38, 10, 8), mat("#c99a7a")); head.position.y = 1.9; g.add(head);
-      var paddle = box(0.1, 0.1, 4.2, mat("#222"), 0.2, 1.1, 0); g.add(paddle);
-      g.userData.paddle = paddle;
-      return g;
-    }
-    [["#3aa7a8", 0.0, 0.62], ["#3aa7a8", 1.7, 0.45], ["#d8613e", 3.6, 0.55]].forEach(function (k) {
-      var obj = kayak(k[0]); scene.add(obj); kayaks.push({ obj: obj, phase: k[1], r: k[2] });
-    });
-  })();
-
-  /* ---------- wedding lawn ---------- */
-  var weddingLights = [];
-  (function () {
-    var g = new T.Group();
-    var white = mat("#f4f0e8");
-    // arch of birch posts with florals
-    g.add(box(0.5, 7, 0.5, white, -3.2, 3.5, 0)); g.add(box(0.5, 7, 0.5, white, 3.2, 3.5, 0));
-    var arch = new T.Mesh(new T.TorusGeometry(3.2, 0.28, 8, 24, Math.PI), white); arch.position.y = 7; g.add(arch);
-    var floralColors = ["#f2c5c0", "#f7efe4", "#d98f86", "#b9c9a4"];
-    for (var i = 0; i < 26; i++) {
-      var a = rand() * Math.PI, f = new T.Mesh(new T.SphereGeometry(rr(0.35, 0.6), 8, 6), mat(floralColors[i % 4]));
-      f.position.set(Math.cos(a) * 3.2 + rr(-0.3, 0.3), 7 + Math.sin(a) * 3.2 + rr(-0.3, 0.3), rr(-0.4, 0.4)); g.add(f);
-    }
-    // aisle runner + rows of chairs
-    g.add(box(2.2, 0.08, 22, mat("#efe9df"), 0, 0.05, 14));
-    for (var row = 0; row < 6; row++) {
-      for (var side = -1; side <= 1; side += 2) {
-        for (var c = 0; c < 4; c++) {
-          var ch = new T.Group();
-          ch.add(box(1, 0.2, 1, white, 0, 1, 0)); ch.add(box(1, 1.2, 0.15, white, 0, 1.6, 0.45));
-          ch.add(box(0.12, 1, 0.12, white, -0.4, 0.5, -0.4)); ch.add(box(0.12, 1, 0.12, white, 0.4, 0.5, -0.4));
-          ch.position.set(side * (2.2 + c * 1.5), 0, 6 + row * 2.6);
-          g.add(ch);
-        }
-      }
-    }
-    // café lights strung between poles
-    var poleM = mat("#3b3631");
-    [[-10, 4], [10, 4], [-10, 22], [10, 22]].forEach(function (p) { g.add(box(0.35, 8, 0.35, poleM, p[0], 4, p[1])); });
-    var bulb = glow("#ffd89a", 0.6);
-    [[-10, 4, 10, 22], [10, 4, -10, 22], [-10, 4, 10, 4], [-10, 22, 10, 22]].forEach(function (ln) {
-      for (var j = 1; j < 14; j++) {
-        var t = j / 14, b = new T.Mesh(new T.SphereGeometry(0.17, 6, 5), bulb);
-        b.position.set(T.MathUtils.lerp(ln[0], ln[2], t), 8 - Math.sin(t * Math.PI) * 1.4, T.MathUtils.lerp(ln[1], ln[3], t));
-        g.add(b); weddingLights.push(b);
-      }
-    });
-    g.traverse(function (o) { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-    // face the lake: arch at the water's edge, guests looking north-east toward it
-    place(g, -54, 52, -0.8, 0.1);
-    anchors.wedding = new T.Vector3(-54, height(-54, 52) + 6, 52);
-  })();
-
-  /* ---------- boardwalk trail through the woods ---------- */
-  (function () {
-    var curve = new T.CatmullRomCurve3([
-      new T.Vector3(-70, 0, 112), new T.Vector3(-92, 0, 128), new T.Vector3(-118, 0, 122), new T.Vector3(-140, 0, 140), new T.Vector3(-165, 0, 132)
-    ]);
-    var pts = curve.getSpacedPoints(70);
-    var plankGeo = new T.BoxGeometry(4.2, 0.3, 1.1);
-    var inst = new T.InstancedMesh(plankGeo, mat("#a48b6a"), pts.length);
+    var im = new T.InstancedMesh(new T.BoxGeometry(width, 0.2, 0.75), mat(color), pts.length);
     var m4 = new T.Matrix4(), q = new T.Quaternion(), up = new T.Vector3(0, 1, 0), p = new T.Vector3(), one = new T.Vector3(1, 1, 1);
-    pts.forEach(function (pt, i) {
-      var nxt = pts[Math.min(i + 1, pts.length - 1)], prv = pts[Math.max(i - 1, 0)];
-      var ang = Math.atan2(nxt.x - prv.x, nxt.z - prv.z);
-      q.setFromAxisAngle(up, ang);
-      p.set(pt.x, height(pt.x, pt.z) + 0.9, pt.z);
-      m4.compose(p, q, one); inst.setMatrixAt(i, m4);
-    });
-    inst.castShadow = true; inst.receiveShadow = true; scene.add(inst);
-    anchors.trail = new T.Vector3(-118, height(-118, 122) + 3, 122);
-  })();
+    pts.forEach(function (pt, i) { q.setFromAxisAngle(up, pt[2]); p.set(pt[0], Math.max(y, height(pt[0], pt[1]) + 0.4), pt[1]); m4.compose(p, q, one); im.setMatrixAt(i, m4); });
+    im.castShadow = im.receiveShadow = true; scene.add(im);
+  }
+  planks(L.dock, 2.2, "#9a8466", 0.9);
+  planks(L.boardwalk, 1.8, "#a48b6a", 0.9);
 
-  /* ---------- trees (instanced) ---------- */
+  /* ---------- woods: trees on every wooded cell ---------- */
   (function () {
-    var reserved = [
-      [12, -72, 26], [-82, -40, 26], [72, -42, 18], [-112, 68, 14], [182, 48, 26], [-54, 52, 30], [18, -38, 10], [32, -44, 8],
-      // keep camera stops clear
-      [52, -18, 16], [-42, 2, 16], [46, -26, 22], [-66, 112, 14], [-86, 84, 20], [-70, 68, 12], [-6, -36, 16], [48, 72, 16]
-    ];
     function blocked(x, z) {
-      if (lakeD(x, z) < 1.25) return true;
-      if (inPasture(x, z, 8)) return true;
       for (var i = 0; i < reserved.length; i++) { var r = reserved[i]; if (Math.hypot(x - r[0], z - r[1]) < r[2]) return true; }
-      // keep the boardwalk clear
-      if (z > 105 && z < 150 && x < -60 && x > -175) { var mid = 112 + (-(x + 70)) * 0.32; if (Math.abs(z - mid) < 6) return true; }
       return false;
     }
-    function density(x, z) {
-      var d = 0.06;
-      if (x < -55) d = 0.75;
-      if (z > 105) d = Math.max(d, 0.7);
-      if (Math.hypot(x, z) > 240) d = 0.85;
-      if (z < -110) d = Math.max(d, 0.55);
-      return d;
-    }
     var pines = [], leafy = [];
-    for (var i = 0; i < 4200 && (pines.length + leafy.length) < 1300; i++) {
-      var x = rr(-420, 420), z = rr(-420, 420);
-      if (blocked(x, z) || rand() > density(x, z)) continue;
-      (rand() < 0.5 ? pines : leafy).push([x, height(x, z), z, rr(0.75, 1.45)]);
+    var density = small ? 0.22 : 0.36;
+    for (var gz = 0; gz < G.h; gz++) for (var gx = 0; gx < G.w; gx++) {
+      var c = G.cls[gz * G.w + gx];
+      var p = c === "0" ? density : c === "2" ? 0.012 : c === "1" ? 0.006 : 0;
+      if (rand() > p) continue;
+      var x = -SW / 2 + (gx + rand()) * G.cell, z = -SH / 2 + (gz + rand()) * G.cell;
+      if (wat(x, z) > 0.15 || blocked(x, z)) continue;
+      (rand() < 0.22 ? pines : leafy).push([x, height(x, z), z, rr(0.8, 1.35)]);
     }
-    // a few hand-placed trees around the homes
-    [[0, -88], [26, -86], [-8, -60], [-98, -54], [-66, -58], [84, -62], [-126, 56], [-100, 82], [-122, 82]].forEach(function (t) { pines.push([t[0], height(t[0], t[1]), t[1], rr(0.9, 1.3)]); });
-
-    var m4 = new T.Matrix4(), q = new T.Quaternion(), p = new T.Vector3(), s = new T.Vector3(), col = new T.Color();
-    // pines: two stacked cones + trunk
-    var pineGeoA = new T.ConeGeometry(4.2, 9, 7); pineGeoA.translate(0, 8, 0);
-    var pineGeoB = new T.ConeGeometry(3.1, 7, 7); pineGeoB.translate(0, 12.5, 0);
-    var trunkGeo = new T.CylinderGeometry(0.5, 0.7, 4, 6); trunkGeo.translate(0, 2, 0);
-    var pineMat = new T.MeshStandardMaterial({ color: "#ffffff", roughness: 0.9 });
-    var trunkMat = mat("#5a4330");
-    var iA = new T.InstancedMesh(pineGeoA, pineMat, pines.length), iB = new T.InstancedMesh(pineGeoB, pineMat, pines.length), iT = new T.InstancedMesh(trunkGeo, trunkMat, pines.length + leafy.length);
-    var pineCols = ["#2f4a32", "#36553a", "#3e5f3c", "#8aa14a" /* tamarack */];
+    // forest beyond the traced square
+    var ringN = small ? 900 : 2000;
+    for (var i = 0; i < ringN; i++) {
+      var x2 = rr(-SW / 2 - 260, SW / 2 + 260), z2 = rr(-SH / 2 - 260, SH / 2 + 260);
+      if (Math.abs(x2) < SW / 2 && Math.abs(z2) < SH / 2) continue;
+      (rand() < 0.22 ? pines : leafy).push([x2, 1.3, z2, rr(0.8, 1.35)]);
+    }
+    var m4 = new T.Matrix4(), q = new T.Quaternion(), p = new T.Vector3(), s = new T.Vector3(), col = new T.Color(), up = new T.Vector3(0, 1, 0);
+    var pineA = new T.ConeGeometry(4.2, 10, 7); pineA.translate(0, 10, 0);
+    var pineB = new T.ConeGeometry(3, 8, 7); pineB.translate(0, 15, 0);
+    var trunk = new T.CylinderGeometry(0.5, 0.75, 6, 5); trunk.translate(0, 3, 0);
+    var crown = new T.IcosahedronGeometry(5.6, 1); crown.translate(0, 11, 0);
+    var white = function (flat) { return new T.MeshStandardMaterial({ color: "#ffffff", roughness: 0.95, flatShading: !!flat }); };
+    var iA = new T.InstancedMesh(pineA, white(), pines.length), iB = new T.InstancedMesh(pineB, white(), pines.length);
+    var iC = new T.InstancedMesh(crown, white(true), leafy.length);
+    var iT = new T.InstancedMesh(trunk, mat("#5a4330"), pines.length + leafy.length);
+    var pineCols = ["#2c4630", "#33513a", "#3b5a3a"];
+    var leafCols = ["#3f5a30", "#4b6634", "#56703a", "#61793d", "#a8743a", "#b5592f", "#c99a3e"];
     pines.forEach(function (t, i) {
-      q.setFromAxisAngle(new T.Vector3(0, 1, 0), rand() * 6.28);
-      p.set(t[0], t[1] - 0.3, t[2]); s.set(t[3], t[3] * rr(0.9, 1.25), t[3]); m4.compose(p, q, s);
+      q.setFromAxisAngle(up, rand() * 6.28); p.set(t[0], t[1] - 0.3, t[2]); s.set(t[3], t[3] * rr(0.9, 1.3), t[3]); m4.compose(p, q, s);
       iA.setMatrixAt(i, m4); iB.setMatrixAt(i, m4); iT.setMatrixAt(i, m4);
-      col.set(pineCols[rand() < 0.1 ? 3 : Math.floor(rand() * 3)]);
-      iA.setColorAt(i, col); iB.setColorAt(i, col);
+      col.set(pineCols[Math.floor(rand() * 3)]); iA.setColorAt(i, col); iB.setColorAt(i, col);
     });
-    // deciduous: lumpy crowns in summer greens with early-autumn accents
-    var crownGeo = new T.IcosahedronGeometry(4.6, 1); crownGeo.translate(0, 8.5, 0);
-    var crownMat = new T.MeshStandardMaterial({ color: "#ffffff", roughness: 0.95, flatShading: true });
-    var iC = new T.InstancedMesh(crownGeo, crownMat, leafy.length);
-    var leafCols = ["#4f6b35", "#5f7a3a", "#6c8540", "#c9773a", "#b8542f", "#d9a440"];
     leafy.forEach(function (t, i) {
-      q.setFromAxisAngle(new T.Vector3(0, 1, 0), rand() * 6.28);
-      p.set(t[0], t[1] - 0.3, t[2]); s.set(t[3], t[3] * rr(0.85, 1.2), t[3]); m4.compose(p, q, s);
+      q.setFromAxisAngle(up, rand() * 6.28); p.set(t[0], t[1] - 0.3, t[2]); s.set(t[3], t[3] * rr(0.8, 1.15), t[3]); m4.compose(p, q, s);
       iC.setMatrixAt(i, m4); iT.setMatrixAt(pines.length + i, m4);
-      col.set(leafCols[rand() < 0.22 ? 3 + Math.floor(rand() * 3) : Math.floor(rand() * 3)]);
-      iC.setColorAt(i, col);
+      col.set(leafCols[rand() < 0.14 ? 4 + Math.floor(rand() * 3) : Math.floor(rand() * 4)]); iC.setColorAt(i, col);
     });
-    [iA, iB, iT, iC].forEach(function (m) { m.castShadow = true; m.receiveShadow = true; scene.add(m); });
+    [iA, iB, iC, iT].forEach(function (m) { m.castShadow = true; m.receiveShadow = true; scene.add(m); });
+
+    // reeds across the marsh
+    var reeds = [];
+    for (var gz2 = 0; gz2 < G.h; gz2++) for (var gx2 = 0; gx2 < G.w; gx2++) {
+      if (G.cls[gz2 * G.w + gx2] !== "2") continue;
+      for (var k = 0; k < 3; k++) { var rx = -SW / 2 + (gx2 + rand()) * G.cell, rz = -SH / 2 + (gz2 + rand()) * G.cell; reeds.push([rx, height(rx, rz), rz]); }
+    }
+    var reedM = new T.InstancedMesh(new T.ConeGeometry(0.9, 2.4, 5).translate(0, 1.2, 0), new T.MeshStandardMaterial({ color: "#ffffff", roughness: 1 }), reeds.length);
+    var reedCols = ["#a39a72", "#8f8a63", "#b3a77c", "#7d7f58"];
+    reeds.forEach(function (r, i) { s.set(1, rr(0.6, 1.4), 1); q.identity(); p.set(r[0], r[1] - 0.2, r[2]); m4.compose(p, q, s); reedM.setMatrixAt(i, m4); col.set(reedCols[i % 4]); reedM.setColorAt(i, col); });
+    scene.add(reedM);
   })();
 
-  /* ---------- fire & fireflies ---------- */
-  var fireLight = new T.PointLight("#ff9a4a", 0, 40, 2);
-  fireLight.position.copy(anchors.fire).add(new T.Vector3(0, 1.6, 0));
-  scene.add(fireLight);
-  var flames = new T.Group();
-  for (var fl = 0; fl < 4; fl++) {
-    var flame = new T.Mesh(new T.ConeGeometry(0.55 - fl * 0.08, 2.2 - fl * 0.3, 7), glow(fl % 2 ? "#ffb347" : "#ff7a2f", 1.6));
-    flame.position.set(rr(-0.4, 0.4), 1.1, rr(-0.4, 0.4)); flames.add(flame);
+  /* ---------- horses in the pastures ---------- */
+  var animals = [];
+  function horse(color, legsColor) {
+    var g = new T.Group(), body = mat(color), dark = mat(legsColor);
+    g.add(box(2.4, 1, 0.8, body, 0, 1.6, 0));
+    var legs = [];
+    [[0.9, 0.3], [0.9, -0.3], [-0.9, 0.3], [-0.9, -0.3]].forEach(function (l) { var leg = box(0.22, 1.2, 0.22, dark, l[0], 0.6, l[1]); g.add(leg); legs.push(leg); });
+    var neck = box(0.45, 1.3, 0.45, body, 1.25, 2.3, 0); neck.rotation.z = -0.5; g.add(neck);
+    var head = box(0.9, 0.42, 0.42, body, 1.85, 2.85, 0); head.rotation.z = -0.4; g.add(head);
+    var tail = box(0.18, 0.9, 0.18, dark, -1.25, 1.5, 0); tail.rotation.z = 0.35; g.add(tail);
+    g.userData.legs = legs; g.scale.setScalar(1.15);
+    return g;
   }
-  flames.position.copy(anchors.fire).add(new T.Vector3(0, 0.6, 0));
-  scene.add(flames);
+  function openNear(center, radius) {
+    for (var i = 0; i < 40; i++) {
+      var x = center[0] + rr(-radius, radius), z = center[1] + rr(-radius, radius);
+      var blocked = reserved.some(function (r) { return Math.hypot(x - r[0], z - r[1]) < r[2]; });
+      if (cls(x, z) === 1 && !blocked) return [x, z];
+    }
+    return [center[0], center[1]];
+  }
+  var horseCols = [["#6b3f24", "#2a1a12"], ["#efe8dc", "#cfc6b6"], ["#2a2420", "#1a1512"], ["#8f5a34", "#2a1a12"], ["#b2a08c", "#4a3e33"], ["#5a3a26", "#2a1a12"]];
+  horseCols.forEach(function (c, i) {
+    var area = i < 4 ? { c: P.pasture, r: 55 } : { c: [P.barn[0] + 40, P.barn[1] - 45], r: 30 };
+    var at = openNear(area.c, area.r);
+    var h = horse(c[0], c[1]); h.position.set(at[0], height(at[0], at[1]), at[1]); h.rotation.y = rand() * 6.28; scene.add(h);
+    animals.push({ obj: h, area: area, target: new T.Vector3(at[0], 0, at[1]), wait: rand() * 5, phase: rand() * 10 });
+  });
 
+  /* ---------- kayaks on the lake ---------- */
+  var kayaks = [];
+  (function () {
+    function kayak(color) {
+      var g = new T.Group();
+      var hull = new T.Mesh(new T.SphereGeometry(1, 14, 8), mat(color, { roughness: 0.5 })); hull.scale.set(2.2, 0.35, 0.5); hull.castShadow = true; g.add(hull);
+      g.add(box(0.5, 0.9, 0.5, mat("#2d3a44"), 0, 0.6, 0));
+      var hd = new T.Mesh(new T.SphereGeometry(0.28, 8, 6), mat("#c99a7a")); hd.position.y = 1.3; g.add(hd);
+      var paddle = box(0.08, 0.08, 2.8, mat("#222"), 0.1, 0.8, 0); g.add(paddle); g.userData.paddle = paddle;
+      return g;
+    }
+    [["#3aa7a8", 0, 1], ["#3aa7a8", 0.25, 0.85], ["#d8613e", 2.4, 0.7]].forEach(function (k) {
+      var o = kayak(k[0]); scene.add(o); kayaks.push({ obj: o, phase: k[1], s: k[2] });
+    });
+  })();
+  function kayakPos(k, t) {
+    // an ellipse aligned with the lake's long axis (tilted toward the NNE)
+    var a = t * 0.025 + k.phase;
+    var ex = Math.cos(a) * 55 * k.s, ez = Math.sin(a) * 170 * k.s, rot = -0.33;
+    return [P.lake[0] + ex * Math.cos(rot) - ez * Math.sin(rot), P.lake[1] + ex * Math.sin(rot) + ez * Math.cos(rot)];
+  }
+
+  /* ---------- fireflies for dusk ---------- */
   var fireflies;
   (function () {
-    var g = new T.BufferGeometry(), arr = [];
-    for (var i = 0; i < 260; i++) { var x = rr(-160, 200), z = rr(-120, 160); arr.push(x, height(x, z) + rr(1.5, 8), z); }
-    g.setAttribute("position", new T.Float32BufferAttribute(arr, 3));
-    fireflies = new T.Points(g, new T.PointsMaterial({ color: "#ffe9a3", size: 1.1, transparent: true, opacity: 0, depthWrite: false }));
+    var arr = [];
+    for (var i = 0; i < 320; i++) { var x = rr(P.homes[0] - 140, P.homes[0] + 120), z = rr(P.homes[1] - 80, P.arenas[1]); arr.push(x, height(x, z) + rr(1.5, 7), z); }
+    var g = new T.BufferGeometry(); g.setAttribute("position", new T.Float32BufferAttribute(arr, 3));
+    fireflies = new T.Points(g, new T.PointsMaterial({ color: "#ffe9a3", size: 1.6, transparent: true, opacity: 0, depthWrite: false }));
     scene.add(fireflies);
   })();
 
-  /* ---------- camera chapters ---------- */
-  function V(x, y, z) { return new T.Vector3(x, y, z); }
+  /* ---------- camera chapters (positions derived from the real layout) ---------- */
+  function at(p, dx, y, dz) { return new T.Vector3(p[0] + dx, y + height(p[0], p[1]), p[1] + dz); }
   var CHAPTERS = [
-    { pos: V(230, 150, 250), look: V(10, 0, 10), dusk: 0, anchor: null },              // the whole farm
-    { pos: V(48, 16, 72), look: V(8, 1, -10), dusk: 0, anchor: null },                // Narrin Lake
-    { pos: V(52, 26, -18), look: V(12, 8, -70), dusk: 0.05, anchor: "clubhouse" },    // Clubhouse
-    { pos: V(-42, 24, 2), look: V(-82, 6, -40), dusk: 0.08, anchor: "lodge" },        // Lodge
-    { pos: V(46, 16, -24), look: V(72, 5, -44), dusk: 0.15, anchor: "grooms" },       // Grooms
-    { pos: V(-66, 42, 112), look: V(-112, 4, 70), dusk: 0.18, anchor: "woods" },      // Woods & trail
-    { pos: V(95, 58, 170), look: V(130, 2, 60), dusk: 0.22, anchor: "barn" },         // pastures & boarding
-    { pos: V(-88, 22, 86), look: V(-50, 3, 48), dusk: 0.55, anchor: "wedding" },      // weddings
-    { pos: V(-6, 24, -34), look: V(16, 12, -58), dusk: 1, anchor: null }               // the fire, at dusk
+    { pos: at(P.overview, -60, 470, 560), look: at(P.overview, -150, 0, -40), dusk: 0, anchor: null },             // the whole farm
+    { pos: at(P.lake, 40, 190, 330), look: at(P.lake, -60, 0, -60), dusk: 0, anchor: "lake" },                     // Narrin Lake, from the south
+    { pos: at(P.dock, 70, 75, 75), look: at(P.dock, -20, 0, -15), dusk: 0.04, anchor: "dock" },                    // dock & marsh
+    { pos: at(P.homes, 130, 70, 110), look: at(P.homes, 0, 4, 0), dusk: 0.08, anchor: "homes" },                  // the homes
+    { pos: at(P.boardwalk, 30, 62, 45), look: at(P.boardwalk, -6, 0, -4), dusk: 0.12, anchor: "boardwalk" },        // trail through the woods
+    { pos: at(P.barn, 150, 75, 90), look: at(P.barn, 0, 4, 0), dusk: 0.16, anchor: "barn" },                      // barn & boarding
+    { pos: at(P.arenas, 150, 95, 150), look: at(P.arenas, -10, 0, -10), dusk: 0.22, anchor: "arenas" },          // riding arenas
+    { pos: at(P.pasture, 120, 70, 140), look: at(P.pasture, -10, 0, -10), dusk: 0.4, anchor: "pasture" },        // pastures
+    { pos: at(P.lake, 20, 150, 120), look: at(P.homes, -40, 0, 20), dusk: 1, anchor: null }                       // long evenings
   ];
-  CHAPTERS.forEach(function (c) { c.look.y += Math.max(0, height(c.look.x, c.look.z)); });
-  var ANCHOR_LABELS = { clubhouse: "The Clubhouse", lodge: "The Lodge", grooms: "The Grooms", woods: "The Woods", barn: "Barn & pastures", wedding: "Wedding lawn" };
+  var ANCHORS = { lake: [P.lake, 6], dock: [P.dock, 6], homes: [P.homes, 16], boardwalk: [P.boardwalk, 8], barn: [P.barn, 18], arenas: [P.arenas, 6], pasture: [P.pasture, 6] };
+  var ANCHOR_LABELS = { lake: "Narrin Lake", dock: "Dock & marsh", homes: "The homes", boardwalk: "Boardwalk trail", barn: "Barn", arenas: "Riding arenas", pasture: "Pastures" };
 
   var steps = Array.prototype.slice.call(document.querySelectorAll(".tour-step"));
   var hudWrap = document.querySelector(".tour-hud");
@@ -565,13 +350,11 @@
   var hudBtns = [];
   if (hudWrap) {
     steps.forEach(function (st, i) {
-      var b = document.createElement("button");
-      b.type = "button";
+      var b = document.createElement("button"); b.type = "button";
       b.setAttribute("aria-label", "Go to: " + (st.querySelector("h3") ? st.querySelector("h3").textContent : "chapter " + (i + 1)));
       b.addEventListener("click", function () {
-        var r = stage.getBoundingClientRect();
         var total = stage.offsetHeight - window.innerHeight;
-        var y = window.scrollY + r.top + (i / (CHAPTERS.length - 1)) * total + 2;
+        var y = window.scrollY + stage.getBoundingClientRect().top + (i / (CHAPTERS.length - 1)) * total + 2;
         window.scrollTo({ top: y, behavior: reduceMotion ? "auto" : "smooth" });
       });
       hudWrap.appendChild(b); hudBtns.push(b);
@@ -580,22 +363,18 @@
 
   var camPos = CHAPTERS[0].pos.clone(), camLook = CHAPTERS[0].look.clone();
   var wantPos = camPos.clone(), wantLook = camLook.clone();
-  var dusk = 0, wantDusk = 0;
+  var dusk = 0, wantDusk = 0, activeIndex = -1;
   var mouse = { x: 0, y: 0 };
   window.addEventListener("pointermove", function (e) { mouse.x = e.clientX / window.innerWidth - 0.5; mouse.y = e.clientY / window.innerHeight - 0.5; }, { passive: true });
-
   function ease(t) { return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; }
-  var activeIndex = -1;
+
   function readScroll() {
-    var r = stage.getBoundingClientRect();
-    var total = stage.offsetHeight - window.innerHeight;
+    var r = stage.getBoundingClientRect(), total = stage.offsetHeight - window.innerHeight;
     var p = total > 0 ? Math.min(1, Math.max(0, -r.top / total)) : 0;
-    var f = p * (CHAPTERS.length - 1);
-    var i = Math.min(CHAPTERS.length - 2, Math.floor(f));
-    var t = ease(f - i);
+    var f = p * (CHAPTERS.length - 1), i = Math.min(CHAPTERS.length - 2, Math.floor(f)), t = ease(f - i);
     var a = CHAPTERS[i], b = CHAPTERS[i + 1];
     wantPos.lerpVectors(a.pos, b.pos, t);
-    wantPos.y += Math.sin(t * Math.PI) * 28; // lift between chapters so we glide over trees
+    wantPos.y += Math.sin(t * Math.PI) * Math.min(120, a.pos.distanceTo(b.pos) * 0.25);
     wantLook.lerpVectors(a.look, b.look, t);
     wantDusk = T.MathUtils.lerp(a.dusk, b.dusk, t);
     if (progressBar) progressBar.style.width = (p * 100).toFixed(2) + "%";
@@ -609,47 +388,28 @@
   }
   window.addEventListener("scroll", readScroll, { passive: true });
 
-  /* ---------- resize ---------- */
   function resize() {
-    var w = canvas.clientWidth, h = canvas.clientHeight;
-    if (!w || !h) return;
-    renderer.setSize(w, h, false);
-    camera.aspect = w / h;
-    camera.fov = w < 700 ? 55 : 42;
-    camera.updateProjectionMatrix();
+    var w = canvas.clientWidth, h = canvas.clientHeight; if (!w || !h) return;
+    renderer.setSize(w, h, false); camera.aspect = w / h; camera.fov = w < 700 ? 55 : 42; camera.updateProjectionMatrix();
   }
   window.addEventListener("resize", resize);
 
-  /* ---------- loop ---------- */
-  var visible = true;
+  var visible = true, running = false;
+  var clock = new T.Clock(), tmpCol = new T.Color(), proj = new T.Vector3();
   if ("IntersectionObserver" in window) {
-    new IntersectionObserver(function (en) { visible = en[0].isIntersecting; if (visible) { clock.getDelta(); requestAnimationFrame(frame); } }, { rootMargin: "200px" }).observe(stage);
+    new IntersectionObserver(function (en) { visible = en[0].isIntersecting; if (visible && !running) { clock.getDelta(); requestAnimationFrame(frame); } }, { rootMargin: "200px" }).observe(stage);
   }
-  var clock = new T.Clock();
-  var tmpCol = new T.Color();
-  var proj = new T.Vector3();
-  var running = false;
 
   function updateAnimals(dt, time) {
     animals.forEach(function (a) {
       var o = a.obj;
-      if (a.wait > 0) {
-        a.wait -= dt;
-        o.children[0].rotation.z = Math.sin(time * 0.8 + a.phase) * 0.02; // grazing sway
-        return;
-      }
+      if (a.wait > 0) { a.wait -= dt; return; }
       var dx = a.target.x - o.position.x, dz = a.target.z - o.position.z, d = Math.hypot(dx, dz);
-      if (d < 0.6) {
-        a.target.set(rr(a.area.x0, a.area.x1), 0, rr(a.area.z0, a.area.z1));
-        a.wait = rr(3, 9);
-        return;
-      }
-      var want = Math.atan2(-dz, dx);
-      var cur = o.rotation.y, diff = Math.atan2(Math.sin(want - cur), Math.cos(want - cur));
+      if (d < 0.8) { var n = openNear(a.area.c, a.area.r); a.target.set(n[0], 0, n[1]); a.wait = rr(3, 10); return; }
+      var want = Math.atan2(-dz, dx), cur = o.rotation.y, diff = Math.atan2(Math.sin(want - cur), Math.cos(want - cur));
       o.rotation.y = cur + diff * Math.min(1, dt * 2);
-      var step = Math.min(d, a.speed * dt);
-      o.position.x += Math.cos(o.rotation.y) * step;
-      o.position.z -= Math.sin(o.rotation.y) * step;
+      var step = Math.min(d, 2.2 * dt);
+      o.position.x += Math.cos(o.rotation.y) * step; o.position.z -= Math.sin(o.rotation.y) * step;
       o.position.y = height(o.position.x, o.position.z);
       var legs = o.userData.legs;
       for (var i = 0; i < legs.length; i++) legs[i].rotation.z = Math.sin(time * 7 + a.phase + (i % 2 ? Math.PI : 0)) * 0.35;
@@ -659,61 +419,48 @@
   function frame() {
     if (!visible) { running = false; return; }
     running = true;
-    var dt = Math.min(clock.getDelta(), 0.05);
-    var time = clock.elapsedTime;
-    var k = reduceMotion ? 1 : 1 - Math.pow(0.0025, dt);
-
-    camPos.lerp(wantPos, k); camLook.lerp(wantLook, k);
-    dusk += (wantDusk - dusk) * k;
-    camera.position.set(camPos.x + mouse.x * 6, camPos.y - mouse.y * 3, camPos.z);
+    var dt = Math.min(clock.getDelta(), 0.05), time = clock.elapsedTime;
+    var k = reduceMotion ? 1 : 1 - Math.pow(0.003, dt);
+    camPos.lerp(wantPos, k); camLook.lerp(wantLook, k); dusk += (wantDusk - dusk) * k;
+    camera.position.set(camPos.x + mouse.x * 8, camPos.y - mouse.y * 4, camPos.z);
     camera.lookAt(camLook);
 
-    // time of day
     var sky = tmpCol.copy(DAY_SKY).lerp(DUSK_SKY, Math.min(1, dusk * 1.4));
     if (dusk > 0.7) sky.lerp(NIGHT_SKY, (dusk - 0.7) / 0.3 * 0.55);
     scene.background.copy(sky); scene.fog.color.copy(sky);
-    sun.intensity = 1.6 - dusk * 1.05;
+    sun.intensity = 1.7 - dusk * 1.1;
     sun.color.set("#fff1d6").lerp(new T.Color("#ff9d5c"), dusk);
-    sun.position.set(160 - dusk * 300, 200 - dusk * 150, 90);
-    hemi.intensity = 0.75 - dusk * 0.3;
-    windowMats.forEach(function (m) { m.emissiveIntensity = 0.15 + dusk * 1.6; });
-    var flicker = 0.85 + Math.sin(time * 13) * 0.08 + Math.sin(time * 23.7) * 0.07;
-    fireLight.intensity = (0.4 + dusk * 2.6) * flicker;
-    flames.children.forEach(function (f, i) { f.scale.y = 0.8 + Math.sin(time * (9 + i * 3) + i) * 0.25; });
-    fireflies.material.opacity = Math.max(0, dusk - 0.4) * 1.4 * (0.75 + Math.sin(time * 3) * 0.25);
-    stringBulbs.concat(weddingLights).forEach(function (b) { b.material.emissiveIntensity = 0.6 + dusk * 2; });
+    sun.target.position.copy(camLook);
+    sun.position.set(camLook.x + 260 - dusk * 520, camLook.y + 380 - dusk * 250, camLook.z + 160);
+    hemi.intensity = 0.8 - dusk * 0.35;
+    windowMats.forEach(function (m) { m.emissiveIntensity = 0.1 + dusk * 1.8; });
+    fireflies.material.opacity = Math.max(0, dusk - 0.45) * 1.5 * (0.75 + Math.sin(time * 3) * 0.25);
+    glints.material.opacity = 0.35 + Math.sin(time * 1.7) * 0.2 - dusk * 0.25;
 
-    // kayaks loop around the lake
-    kayaks.forEach(function (k) {
-      var a = time * 0.06 + k.phase;
-      var x = Math.cos(a) * LAKE.rx * k.r, z = Math.sin(a) * LAKE.rz * k.r;
-      k.obj.position.set(x, 0.55 + Math.sin(time * 2 + k.phase) * 0.08, z);
-      k.obj.rotation.y = Math.atan2(-Math.cos(a) * LAKE.rz, -Math.sin(a) * LAKE.rx);
-      k.obj.userData.paddle.rotation.x = Math.sin(time * 3 + k.phase) * 0.6;
+    kayaks.forEach(function (kk) {
+      var p0 = kayakPos(kk, time), p1 = kayakPos(kk, time + 0.5);
+      kk.obj.position.set(p0[0], 0.45 + Math.sin(time * 2 + kk.phase) * 0.06, p0[1]);
+      kk.obj.rotation.y = Math.atan2(-(p1[1] - p0[1]), p1[0] - p0[0]);
+      kk.obj.userData.paddle.rotation.x = Math.sin(time * 3 + kk.phase) * 0.6;
     });
-    var gl = scene.getObjectByName("glints");
-    if (gl) { gl.rotation.y = time * 0.01; gl.material.opacity = 0.35 + Math.sin(time * 1.7) * 0.2 - dusk * 0.2; }
-
     if (!reduceMotion) updateAnimals(dt, time);
 
-    // floating label over the featured building
     if (pin) {
       var ch = CHAPTERS[Math.max(0, activeIndex)];
-      if (ch && ch.anchor && anchors[ch.anchor]) {
-        proj.copy(anchors[ch.anchor]).add(new T.Vector3(0, 9, 0)).project(camera);
+      if (ch && ch.anchor && ANCHORS[ch.anchor]) {
+        var an = ANCHORS[ch.anchor];
+        proj.set(an[0][0], height(an[0][0], an[0][1]) + an[1] + 6, an[0][1]).project(camera);
         var on = proj.z < 1 && Math.abs(proj.x) < 0.95 && Math.abs(proj.y) < 0.95;
         pin.style.opacity = on ? "1" : "0";
         pin.style.transform = "translate(-50%, -100%) translate(" + ((proj.x + 1) / 2 * canvas.clientWidth).toFixed(1) + "px," + ((1 - proj.y) / 2 * canvas.clientHeight).toFixed(1) + "px)";
         pin.textContent = ANCHOR_LABELS[ch.anchor];
       } else pin.style.opacity = "0";
     }
-
     renderer.render(scene, camera);
     requestAnimationFrame(frame);
   }
 
-  resize();
-  readScroll();
+  resize(); readScroll();
   camPos.copy(wantPos); camLook.copy(wantLook); dusk = wantDusk;
   if (!running) requestAnimationFrame(frame);
 })();

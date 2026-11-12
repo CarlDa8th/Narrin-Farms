@@ -7,14 +7,15 @@
   "use strict";
   if (!window.L) return;
 
-  // Narrin Lake (USGS GNIS feature 633215). The farm overlooks the lake.
-  var FARM = [42.8301, -83.4729];
+  // Farm buildings on the east side of Narrin Lake (lake centre: USGS GNIS 633215).
+  var FARM = [42.8302, -83.4680];
+  var LAKE = [42.8301, -83.4729];
   var ADDRESS = "1100 Bird Rd, Ortonville, MI 48462";
   var DIRECTIONS = "https://www.google.com/maps/dir/?api=1&destination=" + encodeURIComponent(ADDRESS);
 
   var PLACES = {
     farm:    { latlng: FARM, zoom: 17, color: "#a4402c", title: "Narrin Farms", text: "56 acres of pasture, woods and trails on spring-fed Narrin Lake.<br>" + ADDRESS },
-    lake:    { latlng: [42.8301, -83.4729], zoom: 18, color: "#3f6f78", title: "Narrin Lake", text: "Private-access, spring-fed and motor-free — kayaks and fishing right from the farm." },
+    lake:    { latlng: LAKE, zoom: 17, color: "#3f6f78", title: "Narrin Lake", text: "Private-access, spring-fed and motor-free — kayaks and fishing right from the farm." },
     holly:   { latlng: [42.8128, -83.5075], zoom: 14, color: "#4d6a4f", title: "Holly Recreation Area", text: "Thousands of acres of state trails, beaches and mountain biking — about 0.7 miles from The Woods." },
     ortonville: { latlng: [42.8523, -83.4430], zoom: 15, color: "#c6a46a", title: "Ortonville", text: "Village shops, coffee and dining a few minutes up the road." },
     clarkston:  { latlng: [42.7359, -83.4188], zoom: 15, color: "#c6a46a", title: "Clarkston", text: "Historic downtown restaurants and the Pine Knob Music Theatre area." }
@@ -56,14 +57,11 @@
       var icon;
       if (key === "farm") {
         icon = L.divIcon({ className: "", html: '<div class="pin-pulse"></div><div class="farm-pin"><span>N</span></div>', iconSize: [46, 46], iconAnchor: [23, 46], popupAnchor: [0, -44] });
-      } else if (key === "lake") {
-        return; // same spot as the farm pin
       } else {
         icon = L.divIcon({ className: "", html: '<div class="small-pin" style="background:' + p.color + '"></div>', iconSize: [16, 16], iconAnchor: [8, 8] });
       }
       markers[key] = L.marker(p.latlng, { icon: icon, title: p.title, keyboard: true }).addTo(map).bindPopup(popupHtml(p));
     });
-    markers.lake = markers.farm;
 
     // layer switch
     var layerBtns = el.querySelectorAll(".map-layers button");
@@ -85,7 +83,7 @@
       var p = PLACES[key]; if (!p) return;
       placeBtns.forEach(function (x) { x.classList.toggle("active", x.getAttribute("data-place") === key); });
       map.flyTo(p.latlng, p.zoom, { duration: 1.8 });
-      map.once("moveend", function () { if (key === "lake") { L.popup().setLatLng(p.latlng).setContent(popupHtml(p)).openOn(map); } else if (markers[key]) markers[key].openPopup(); });
+      map.once("moveend", function () { if (markers[key]) markers[key].openPopup(); });
     }
     placeBtns.forEach(function (b) { b.addEventListener("click", function () { stopTour(); go(b.getAttribute("data-place")); }); });
 
