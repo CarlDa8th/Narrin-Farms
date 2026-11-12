@@ -132,6 +132,7 @@
     var g = new T.ExtrudeGeometry(s, { depth: d, bevelEnabled: false }); g.translate(0, 0, -d / 2);
     var p = new T.Mesh(g, m); p.castShadow = true; p.receiveShadow = true; return p;
   }
+  var stringBulbs = [];
   var reserved = []; // [x, z, r] — keep trees off buildings, docks and roads
 
   /* ---------- buildings (real footprints) ---------- */
@@ -143,12 +144,46 @@
       var r = prism(d + 1, 4.5, w + 1, mat("#e3e1dc")); r.rotation.y = Math.PI / 2; r.position.y = 6; g.add(r);
       for (var i = -3; i <= 3; i++) g.add(box(2.4, 1.4, 0.2, WIN, i * (w / 8), 4.5, d / 2 + 0.05));
       g.add(box(4, 5, 0.3, mat("#6b6255"), w / 2 - 6, 2.5, d / 2 + 0.1));
-    } else if (b.kind === "house") {
-      g.add(box(w, 5, d, mat("#6f7468"), 0, 2, 0));
-      var rh = prism(d + 1.2, Math.min(5, d * 0.45), w + 1.2, mat("#585c5d")); rh.rotation.y = Math.PI / 2; rh.position.y = 4.5; g.add(rh);
-      g.add(box(w * 0.18, 1.8, 0.2, WIN, -w * 0.25, 2.6, d / 2 + 0.05));
-      g.add(box(w * 0.18, 1.8, 0.2, WIN, w * 0.2, 2.6, d / 2 + 0.05));
-      g.add(box(w * 0.18, 1.8, 0.2, WIN, 0, 2.6, -d / 2 - 0.05));
+    } else if (b.kind === "lodge") {
+      // the Lodge: brown siding with steep Tudor-style front gables
+      g.add(box(w, 6, d, mat("#6b5848"), 0, 2.5, 0));
+      var rl = prism(d + 1.2, 5, w + 1.2, mat("#8e9190")); rl.rotation.y = Math.PI / 2; rl.position.y = 5.5; g.add(rl);
+      [-w * 0.28, w * 0.05, w * 0.32].forEach(function (x) {
+        var gb = prism(6.5, 6, 4, mat("#8e9190")); gb.position.set(x, 4.5, d / 2); g.add(gb);
+        g.add(box(6, 5, 1, mat("#7c6a56"), x, 3, d / 2 + 0.2));
+        g.add(box(1.8, 2, 0.2, WIN, x, 3.6, d / 2 + 0.8));
+      });
+    } else if (b.kind === "clubhouse") {
+      // the Clubhouse: grey board-and-batten, red gable wing, pergola and fire-pit patio
+      g.add(box(w * 0.7, 5, d, mat("#6f7468"), -w * 0.15, 2, 0));
+      var rc = prism(d + 1, 4, w * 0.7 + 1, mat("#585c5d")); rc.rotation.y = Math.PI / 2; rc.position.set(-w * 0.15, 4.5, 0); g.add(rc);
+      g.add(box(w * 0.3, 6.4, d * 0.9, mat("#93402f"), w * 0.35, 2.7, 0));
+      var r2 = prism(w * 0.3 + 0.6, 3.6, d * 0.9 + 0.6, mat("#585c5d")); r2.position.set(w * 0.35, 5.9, 0); g.add(r2);
+      for (var cw = -2; cw <= 1; cw++) g.add(box(2, 2.2, 0.2, WIN, -w * 0.15 + cw * 3.2, 2.8, d / 2 + 0.05));
+      var wood = mat("#8a6844");
+      [[-1, 1], [-1, -1], [1, 1], [1, -1]].forEach(function (q2) { g.add(box(0.4, 4.5, 0.4, wood, -w / 2 - 3 + q2[0] * 2.5, 2.2, q2[1] * 2.5)); });
+      for (var sl = -3; sl <= 3; sl++) g.add(box(6, 0.25, 0.3, wood, -w / 2 - 3, 4.5, sl * 0.9));
+      g.add(box(12, 0.3, 8, mat("#b9ae9c"), 0, 0.1, d / 2 + 6));
+      var red = mat("#b23a2a");
+      for (var ch = 0; ch < 5; ch++) { var an = ch / 5 * Math.PI * 2; g.add(box(1.2, 1.2, 1.2, red, Math.cos(an) * 3, 0.8, d / 2 + 6 + Math.sin(an) * 3)); }
+      var pit = new T.Mesh(new T.CylinderGeometry(1.2, 1.4, 0.8, 14), mat("#5a4c44")); pit.position.set(0, 0.6, d / 2 + 6); g.add(pit);
+    } else if (b.kind === "woods") {
+      // the Woods: long grey cottage at the edge of the trees
+      g.add(box(w, 4.8, d, mat("#7a7f7a"), 0, 2, 0));
+      var rw = prism(d + 1.2, 4, w + 1.2, mat("#62686e")); rw.rotation.y = Math.PI / 2; rw.position.y = 4.4; g.add(rw);
+      for (var ww = -2; ww <= 2; ww++) g.add(box(1.8, 1.8, 0.2, WIN, ww * (w / 5.5), 2.6, d / 2 + 0.05));
+      g.add(box(w * 0.5, 0.4, 4, mat("#8d7357"), 0, 0.3, d / 2 + 2));
+    } else if (b.kind === "aframe") {
+      // the Grooms: black A-frame with a deck and string lights
+      g.add(box(w + 2, 0.5, d + 6, mat("#8f7c63"), 0, 0.25, 3));
+      var af = prism(w, 10, d, mat("#2b2d2b")); af.position.y = 0.5; g.add(af);
+      var sh = prism(w + 0.8, 10.6, d + 0.4, mat("#6a4a37")); sh.position.y = 0.2; sh.scale.z = 0.98; g.add(sh);
+      var tri = new T.Shape(); tri.moveTo(-1.2, 6); tri.lineTo(1.2, 6); tri.lineTo(0, 8.2); tri.lineTo(-1.2, 6);
+      var tm = new T.Mesh(new T.ShapeGeometry(tri), WIN); tm.position.z = d / 2 + 0.25; g.add(tm);
+      g.add(box(2.6, 2, 0.2, WIN, -1.4, 2.6, d / 2 + 0.25));
+      var bulb = mat("#ffd89a", { emissive: "#ffd89a", emissiveIntensity: 1 }); stringBulbs.push(bulb);
+      for (var sb = 0; sb <= 12; sb++) { var tt = sb / 12; var bl = new T.Mesh(new T.SphereGeometry(0.22, 6, 5), bulb); bl.position.set(tt * 5, 10 - tt * 4 - Math.sin(tt * Math.PI) * 1.3, d / 2 + tt * 6); g.add(bl); }
+      g.add(box(0.3, 6, 0.3, mat("#333"), 5, 3, d / 2 + 6));
     } else {
       g.add(box(w, 4.5, d, mat("#a9a59b"), 0, 1.8, 0));
       var rs = prism(d + 0.8, Math.min(3, d * 0.35), w + 0.8, mat("#e0ddd6")); rs.rotation.y = Math.PI / 2; rs.position.y = 4; g.add(rs);
@@ -156,7 +191,7 @@
     g.position.set(b.x, height(b.x, b.z), b.z);
     g.rotation.y = b.rot || 0;
     scene.add(g);
-    reserved.push([b.x, b.z, Math.max(w, d) * 0.6 + 4]);
+    reserved.push([b.x, b.z, Math.max(w, d) * 0.6 + (b.name ? 12 : 4)]);
   });
   var P = L.points;
 
@@ -260,7 +295,7 @@
       for (var k = 0; k < 3; k++) { var rx = -SW / 2 + (gx2 + rand()) * G.cell, rz = -SH / 2 + (gz2 + rand()) * G.cell; reeds.push([rx, height(rx, rz), rz]); }
     }
     var reedM = new T.InstancedMesh(new T.ConeGeometry(0.9, 2.4, 5).translate(0, 1.2, 0), new T.MeshStandardMaterial({ color: "#ffffff", roughness: 1 }), reeds.length);
-    var reedCols = ["#a39a72", "#8f8a63", "#b3a77c", "#7d7f58"];
+    var reedCols = ["#8a6a58", "#9b7a5e", "#7a5c50", "#a88a66"];
     reeds.forEach(function (r, i) { s.set(1, rr(0.6, 1.4), 1); q.identity(); p.set(r[0], r[1] - 0.2, r[2]); m4.compose(p, q, s); reedM.setMatrixAt(i, m4); col.set(reedCols[i % 4]); reedM.setColorAt(i, col); });
     scene.add(reedM);
   })();
@@ -329,24 +364,28 @@
   /* ---------- camera chapters (positions derived from the real layout) ---------- */
   function at(p, dx, y, dz) { return new T.Vector3(p[0] + dx, y + height(p[0], p[1]), p[1] + dz); }
   var CHAPTERS = [
-    { pos: at(P.overview, -60, 470, 560), look: at(P.overview, -150, 0, -40), dusk: 0, anchor: null },             // the whole farm
-    { pos: at(P.lake, 40, 190, 330), look: at(P.lake, -60, 0, -60), dusk: 0, anchor: "lake" },                     // Narrin Lake, from the south
-    { pos: at(P.dock, 70, 75, 75), look: at(P.dock, -20, 0, -15), dusk: 0.04, anchor: "dock" },                    // dock & marsh
-    { pos: at(P.homes, 130, 70, 110), look: at(P.homes, 0, 4, 0), dusk: 0.08, anchor: "homes" },                  // the homes
-    { pos: at(P.boardwalk, 30, 62, 45), look: at(P.boardwalk, -6, 0, -4), dusk: 0.12, anchor: "boardwalk" },        // trail through the woods
-    { pos: at(P.barn, 150, 75, 90), look: at(P.barn, 0, 4, 0), dusk: 0.16, anchor: "barn" },                      // barn & boarding
-    { pos: at(P.arenas, 150, 95, 150), look: at(P.arenas, -10, 0, -10), dusk: 0.22, anchor: "arenas" },          // riding arenas
-    { pos: at(P.pasture, 120, 70, 140), look: at(P.pasture, -10, 0, -10), dusk: 0.4, anchor: "pasture" },        // pastures
-    { pos: at(P.lake, 20, 150, 120), look: at(P.homes, -40, 0, 20), dusk: 1, anchor: null }                       // long evenings
+    { pos: at(P.overview, -60, 470, 560), look: at(P.overview, -150, 0, -40), dusk: 0, anchor: null },           // the whole farm
+    { pos: at(P.lake, 40, 190, 330), look: at(P.lake, -60, 0, -60), dusk: 0, anchor: "lake" },                    // Narrin Lake, from the south
+    { pos: at(P.marsh, 60, 120, 170), look: at(P.marsh, -40, 0, 0), dusk: 0.03, anchor: "marsh" },              // the marsh & dock
+    { pos: at(P.clubhouse, 60, 70, 75), look: at(P.clubhouse, -10, 0, -18), dusk: 0.06, anchor: "clubhouse" },   // Clubhouse & Lodge
+    { pos: at(P.woods, 40, 75, 95), look: at(P.woods, -2, 0, -4), dusk: 0.1, anchor: "woods" },                  // Woods & Grooms
+    { pos: at(P.boardwalk, 30, 62, 45), look: at(P.boardwalk, -6, 0, -4), dusk: 0.12, anchor: "boardwalk" },     // trail through the woods
+    { pos: at(P.barn, 150, 75, 90), look: at(P.barn, 0, 4, 0), dusk: 0.16, anchor: "barn" },                     // barn & boarding
+    { pos: at(P.arenas, 150, 95, 150), look: at(P.arenas, -10, 0, -10), dusk: 0.22, anchor: "arenas" },         // riding arenas
+    { pos: at(P.pasture, 120, 70, 140), look: at(P.pasture, -10, 0, -10), dusk: 0.4, anchor: "pasture" },       // pastures
+    { pos: at(P.lake, 20, 150, 120), look: at(P.homes, -40, 0, 40), dusk: 1, anchor: null }                      // long evenings
   ];
-  var ANCHORS = { lake: [P.lake, 6], dock: [P.dock, 6], homes: [P.homes, 16], boardwalk: [P.boardwalk, 8], barn: [P.barn, 18], arenas: [P.arenas, 6], pasture: [P.pasture, 6] };
-  var ANCHOR_LABELS = { lake: "Narrin Lake", dock: "Dock & marsh", homes: "The homes", boardwalk: "Boardwalk trail", barn: "Barn", arenas: "Riding arenas", pasture: "Pastures" };
+  var ANCHORS = { lake: [P.lake, 6], marsh: [P.marsh, 6], clubhouse: [P.clubhouse, 0], lodge: [P.lodge, 2], woods: [P.woods, 0], grooms: [P.grooms, 4], boardwalk: [P.boardwalk, 8], barn: [P.barn, 18], arenas: [P.arenas, 6], pasture: [P.pasture, 6] };
+  var ANCHOR_LABELS = { lake: "Narrin Lake", marsh: "The marsh", clubhouse: "The Clubhouse", lodge: "The Lodge", woods: "The Woods", grooms: "The Grooms", boardwalk: "Boardwalk trail", barn: "Barn", arenas: "Riding arenas", pasture: "Pastures" };
+  var EXTRA_PIN = { clubhouse: "lodge", woods: "grooms" }; // chapters that show two homes
 
   var steps = Array.prototype.slice.call(document.querySelectorAll(".tour-step"));
   var hudWrap = document.querySelector(".tour-hud");
   var progressBar = document.querySelector(".tour-progress");
   var label = document.querySelector(".tour-label");
   var pin = document.querySelector(".tour-pin");
+  var pin2 = pin ? pin.cloneNode(false) : null;
+  if (pin2) pin.parentNode.insertBefore(pin2, pin.nextSibling);
   var hudBtns = [];
   if (hudWrap) {
     steps.forEach(function (st, i) {
@@ -416,6 +455,17 @@
     });
   }
 
+  function placePin(el, key) {
+    if (!el) return;
+    if (!key || !ANCHORS[key]) { el.style.opacity = "0"; return; }
+    var an = ANCHORS[key];
+    proj.set(an[0][0], height(an[0][0], an[0][1]) + an[1] + 6, an[0][1]).project(camera);
+    var on = proj.z < 1 && Math.abs(proj.x) < 0.95 && Math.abs(proj.y) < 0.95;
+    el.style.opacity = on ? "1" : "0";
+    el.style.transform = "translate(-50%, -100%) translate(" + ((proj.x + 1) / 2 * canvas.clientWidth).toFixed(1) + "px," + ((1 - proj.y) / 2 * canvas.clientHeight).toFixed(1) + "px)";
+    el.textContent = ANCHOR_LABELS[key];
+  }
+
   function frame() {
     if (!visible) { running = false; return; }
     running = true;
@@ -434,6 +484,7 @@
     sun.position.set(camLook.x + 260 - dusk * 520, camLook.y + 380 - dusk * 250, camLook.z + 160);
     hemi.intensity = 0.8 - dusk * 0.35;
     windowMats.forEach(function (m) { m.emissiveIntensity = 0.1 + dusk * 1.8; });
+    stringBulbs.forEach(function (m) { m.emissiveIntensity = 0.5 + dusk * 2.5; });
     fireflies.material.opacity = Math.max(0, dusk - 0.45) * 1.5 * (0.75 + Math.sin(time * 3) * 0.25);
     glints.material.opacity = 0.35 + Math.sin(time * 1.7) * 0.2 - dusk * 0.25;
 
@@ -445,17 +496,9 @@
     });
     if (!reduceMotion) updateAnimals(dt, time);
 
-    if (pin) {
-      var ch = CHAPTERS[Math.max(0, activeIndex)];
-      if (ch && ch.anchor && ANCHORS[ch.anchor]) {
-        var an = ANCHORS[ch.anchor];
-        proj.set(an[0][0], height(an[0][0], an[0][1]) + an[1] + 6, an[0][1]).project(camera);
-        var on = proj.z < 1 && Math.abs(proj.x) < 0.95 && Math.abs(proj.y) < 0.95;
-        pin.style.opacity = on ? "1" : "0";
-        pin.style.transform = "translate(-50%, -100%) translate(" + ((proj.x + 1) / 2 * canvas.clientWidth).toFixed(1) + "px," + ((1 - proj.y) / 2 * canvas.clientHeight).toFixed(1) + "px)";
-        pin.textContent = ANCHOR_LABELS[ch.anchor];
-      } else pin.style.opacity = "0";
-    }
+    var chap = CHAPTERS[Math.max(0, activeIndex)];
+    placePin(pin, chap && chap.anchor);
+    placePin(pin2, chap && EXTRA_PIN[chap.anchor]);
     renderer.render(scene, camera);
     requestAnimationFrame(frame);
   }
