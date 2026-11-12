@@ -139,19 +139,23 @@
     var g = new T.Group();
     var w = b.w, d = b.d;
     if (b.kind === "barn") {
-      g.add(box(w, 7, d, mat("#b7b3aa"), 0, 2.5, 0));
-      var r = prism(d + 1, 4.5, w + 1, mat("#e3e1dc")); r.rotation.y = Math.PI / 2; r.position.y = 6; g.add(r);
+      g.add(box(w, 7, d, mat("#f1efe9"), 0, 2.5, 0));
+      var r = prism(d + 1, 4.5, w + 1, mat("#1d1f21")); r.rotation.y = Math.PI / 2; r.position.y = 6; g.add(r);
       for (var i = -3; i <= 3; i++) g.add(box(2.4, 1.4, 0.2, WIN, i * (w / 8), 4.5, d / 2 + 0.05));
       g.add(box(4, 5, 0.3, mat("#6b6255"), w / 2 - 6, 2.5, d / 2 + 0.1));
     } else if (b.kind === "lodge") {
-      // the Lodge: brown siding with steep Tudor-style front gables
-      g.add(box(w, 6, d, mat("#6b5848"), 0, 2.5, 0));
-      var rl = prism(d + 1.2, 5, w + 1.2, mat("#8e9190")); rl.rotation.y = Math.PI / 2; rl.position.y = 5.5; g.add(rl);
-      [-w * 0.28, w * 0.05, w * 0.32].forEach(function (x) {
-        var gb = prism(6.5, 6, 4, mat("#8e9190")); gb.position.set(x, 4.5, d / 2); g.add(gb);
-        g.add(box(6, 5, 1, mat("#7c6a56"), x, 3, d / 2 + 0.2));
-        g.add(box(1.8, 2, 0.2, WIN, x, 3.6, d / 2 + 0.8));
+      // the Lodge: two storeys, brown siding, steep Tudor-style gables; the gabled front
+      // (local +z) is rotated in the layout to face the parking court
+      g.add(box(w, 7.5, d, mat("#6b5848"), 0, 3, 0));
+      var rl = prism(d + 1.2, 5, w + 1.2, mat("#8e9190")); rl.rotation.y = Math.PI / 2; rl.position.y = 6.75; g.add(rl);
+      [-w * 0.3, w * 0.02, w * 0.33].forEach(function (x) {
+        g.add(box(6.2, 7.5, 1.4, mat("#7c6a56"), x, 3, d / 2 + 0.5));
+        var gb = prism(6.8, 5.5, 2.2, mat("#8e9190")); gb.position.set(x, 6.75, d / 2 + 0.6); g.add(gb);
+        g.add(box(1.5, 1.8, 0.2, WIN, x - 1.4, 1.8, d / 2 + 1.25));   // ground floor
+        g.add(box(1.5, 1.8, 0.2, WIN, x + 1.4, 1.8, d / 2 + 1.25));
+        g.add(box(2.2, 2, 0.2, WIN, x, 5.3, d / 2 + 1.25));           // second floor, facing the lot
       });
+      g.add(box(2.2, 3, 0.3, mat("#3d3129"), w * 0.17, 1.2, d / 2 + 0.15)); // front door
     } else if (b.kind === "clubhouse") {
       // the Clubhouse: grey board-and-batten, red gable wing, pergola and fire-pit patio
       g.add(box(w * 0.7, 5, d, mat("#6f7468"), -w * 0.15, 2, 0));

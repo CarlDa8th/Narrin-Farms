@@ -1,6 +1,7 @@
-/* Narrin Farms — interactive satellite map (Leaflet + Esri World Imagery)
+/* Narrin Farms — interactive map (Leaflet): Esri satellite imagery, plus our own
+ * illustrated map of Oakland County with the traced farm plan
  *
- * To add a pin for each home, barn or wedding lawn, add an entry to PLACES
+ * To add a pin for each home or the barn, add an entry to PLACES
  * below and a matching <button data-place="..."> in the page's map panel.
  */
 (function () {
@@ -31,8 +32,39 @@
       L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}", { maxZoom: 19 })
     ]);
     var street = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "&copy; OpenStreetMap contributors" });
-    var plan = L.imageOverlay("assets/img/farm-ground.jpg", PLAN_BOUNDS, { attribution: "Farm plan traced from aerial imagery" });
-    return { sat: sat, labels: labels, street: street, plan: plan };
+    return { sat: sat, labels: labels, street: street, plan: countyMap() };
+  }
+
+  /* Our own illustrated map: Oakland County and its neighbours, towns, parks,
+     and the traced farm plan, which appears once you zoom in on the farm. */
+  var OAK = window.OAKLAND_MAP;
+  var COUNTY_BOUNDS = [[42.4315, -83.6901], [42.8885, -83.0835]];
+  function countyMap() {
+    var g = L.layerGroup();
+    if (!OAK) return g;
+    var farmPlan = L.imageOverlay("assets/img/farm-ground.jpg", PLAN_BOUNDS, { pane: "farmPlanPane", attribution: "Farm plan traced from aerial imagery; county lines: U.S. Census Bureau" });
+    OAK.counties.forEach(function (c) {
+      var home = c.name === "Oakland";
+      var poly = L.geoJSON(c.geometry, { interactive: false, style: {
+        color: home ? "#4d6a4f" : "#b5aa94", weight: home ? 2.5 : 1.2, dashArray: home ? null : "4 4",
+        fillColor: home ? "#cfd8bf" : "#ebe2d2", fillOpacity: 1 } });
+      g.addLayer(poly);
+      var ctr = poly.getBounds().getCenter();
+      if (!home) g.addLayer(L.marker(ctr, { interactive: false, icon: L.divIcon({ className: "county-label", html: c.name + " County", iconSize: [140, 20], iconAnchor: [70, 10] }) }));
+    });
+    g.addLayer(L.marker([42.575, -83.42], { interactive: false, icon: L.divIcon({ className: "county-label home", html: "Oakland County", iconSize: [220, 30], iconAnchor: [110, 15] }) }));
+    OAK.parks.forEach(function (pk) {
+      g.addLayer(L.circleMarker([pk[1], pk[2]], { radius: 7, color: "#4d6a4f", weight: 1.5, fillColor: "#86a37a", fillOpacity: 0.9 })
+        .bindTooltip(pk[0], { className: "map-label park" }));
+    });
+    OAK.towns.forEach(function (t) {
+      var seat = t[3] === "seat";
+      g.addLayer(L.circleMarker([t[1], t[2]], { radius: seat ? 5 : t[3] === "city" ? 4 : 3, color: "#1e2420", weight: 1, fillColor: seat ? "#a4402c" : "#fbf8f2", fillOpacity: 1 })
+        .bindTooltip(t[0] + (seat ? " (county seat)" : ""), { permanent: true, direction: "right", offset: [6, 0], className: "map-label" + (seat ? " seat" : "") }));
+    });
+    g.addLayer(farmPlan);
+    g.farmPlan = farmPlan;
+    return g;
   }
 
   function popupHtml(p) {
@@ -46,6 +78,7 @@
     canvas.insertBefore(mapDiv, canvas.firstChild);
 
     var map = L.map(mapDiv, { zoomControl: false, scrollWheelZoom: false, attributionControl: true }).setView(FARM, 15);
+    map.createPane("farmPlanPane").style.zIndex = 450; // above county shading, below markers
     var layers = tileLayers();
     layers.sat.addTo(map);
     layers.labels.addTo(map);
@@ -81,10 +114,21 @@
       if (mode === "satellite") layers.sat.addTo(map);
       if (mode === "hybrid") { layers.sat.addTo(map); layers.labels.addTo(map); }
       if (mode === "map") layers.street.addTo(map);
-      if (mode === "plan") layers.plan.addTo(map);
-      mapDiv.style.background = mode === "plan" ? "#3d5230" : "";
+      if (mode === "plan") { layers.plan.addTo(map); syncPlan(); if (currentMode !== "plan") map.fitBounds(COUNTY_BOUNDS, { padding: [20, 20] }); }
+      mapDiv.style.background = mode === "plan" ? "#e4dccb" : "";
+      mapDiv.classList.toggle("is-plan", mode === "plan");
+      currentMode = mode;
       layerBtns.forEach(function (x) { var on = x.getAttribute("data-layer") === mode; x.classList.toggle("active", on); x.setAttribute("aria-pressed", on ? "true" : "false"); });
     }
+    var currentMode = "hybrid";
+    // the farm plan image is only legible close in; hide it (and the place labels) at county scale
+    function syncPlan() {
+      if (!layers.plan.farmPlan) return;
+      var z = map.getZoom();
+      layers.plan.farmPlan.setOpacity(z >= 13 ? 1 : 0);
+      mapDiv.classList.toggle("zoomed-in", z >= 13);
+    }
+    map.on("zoomend", syncPlan);
     // Where satellite tiles can't load (blocked network, offline), fall back to the farm plan.
     var tileOk = 0, tileBad = 0, fellBack = false;
     layers.sat.on("tileload", function () { tileOk++; });
@@ -93,13 +137,17 @@
       if (!fellBack && tileOk === 0 && tileBad >= 2) {
         fellBack = true; setMode("plan");
         var hint = el.querySelector(".map-hint");
-        if (hint) { hint.style.display = ""; hint.textContent = "Satellite imagery isn’t available here, so you’re seeing the farm plan. Use Get directions for satellite view."; }
+        if (hint) { hint.style.display = ""; hint.textContent = "Satellite imagery isn’t available here, so you’re seeing our map of Oakland County. Zoom in on the N pin for the farm plan."; }
       }
     });
 
     // place buttons
     var placeBtns = el.querySelectorAll("[data-place]");
     function go(key) {
+      if (key === "county") {
+        placeBtns.forEach(function (x) { x.classList.toggle("active", x.getAttribute("data-place") === key); });
+        map.flyToBounds(COUNTY_BOUNDS, { duration: 1.8, padding: [20, 20] }); return;
+      }
       var p = PLACES[key]; if (!p) return;
       placeBtns.forEach(function (x) { x.classList.toggle("active", x.getAttribute("data-place") === key); });
       map.flyTo(p.latlng, p.zoom, { duration: 1.8 });
@@ -123,7 +171,7 @@
         }
         if (t === "tour") {
           if (tourTimer) { stopTour(); return; }
-          var keys = ["farm", "lake", "holly", "ortonville", "clarkston", "farm"];
+          var keys = currentMode === "plan" ? ["county", "ortonville", "holly", "clarkston", "farm"] : ["farm", "lake", "holly", "ortonville", "clarkston", "farm"];
           var i = 0; go(keys[i]);
           tourTimer = setInterval(function () { i++; if (i >= keys.length) { stopTour(); return; } go(keys[i]); }, 4200);
         }
@@ -135,7 +183,7 @@
     if ("IntersectionObserver" in window) {
       var seen = false;
       new IntersectionObserver(function (entries, obs) {
-        if (entries[0].isIntersecting && !seen) { seen = true; obs.disconnect(); map.invalidateSize(); map.flyTo(FARM, 16, { duration: 2.4 }); }
+        if (entries[0].isIntersecting && !seen) { seen = true; obs.disconnect(); map.invalidateSize(); if (currentMode === "plan") map.fitBounds(COUNTY_BOUNDS, { padding: [20, 20] }); else map.flyTo(FARM, 16, { duration: 2.4 }); }
       }, { threshold: 0.35 }).observe(canvas);
     }
   }

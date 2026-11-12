@@ -3,7 +3,7 @@
 Three-page static site for Narrin Farms (1100 Bird Rd, Ortonville, MI 48462):
 
 - `index.html` — home: hero, story, scroll-driven 3D farm tour, gallery, seasons, interactive map
-- `stay.html` — Stay & Celebrate: the four homes, comparison, weddings, horse boarding, amenities
+- `stay.html` — Stay & Board: the four homes, comparison, horse boarding, amenities
 - `contact.html` — Visit & Contact: contact details, inquiry form, map and directions, FAQ
 
 No build step. Open `index.html`, or serve the folder with any static host.

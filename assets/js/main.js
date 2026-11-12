@@ -125,7 +125,7 @@
       if (!form.reportValidity()) return;
       var fd = new FormData(form);
       var type = fd.get("type");
-      var labels = { stay: "Stay inquiry", wedding: "Wedding inquiry", boarding: "Horse boarding inquiry", other: "General question" };
+      var labels = { stay: "Stay inquiry", boarding: "Horse boarding inquiry", other: "General question" };
       var lines = [
         "Name: " + fd.get("name"),
         "Email: " + fd.get("email"),
