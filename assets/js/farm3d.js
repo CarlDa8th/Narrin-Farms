@@ -1,8 +1,7 @@
 /* Narrin Farms — scroll-driven 3D farm tour (three.js r149)
  *
  * The model is built from the farm's real layout (assets/js/farm-layout.js),
- * traced from a satellite view: Narrin Lake and its wooded shoreline, the marsh
- * to the north-east, the dock, the homes along the drive, the long barn and
+ * traced from a satellite view: Narrin Lake and its wooded shoreline, the marsh, the dock, the homes along the drive, the long barn and
  * outbuildings, the two riding arenas and the pastures. Units are metres,
  * x = east, z = south.
  */
@@ -288,7 +287,7 @@
     });
     [iA, iB, iC, iT].forEach(function (m) { m.castShadow = true; m.receiveShadow = true; scene.add(m); });
 
-    // reeds across the marsh
+    // reeds across the marsh (the brown band north-east of the lake)
     var reeds = [];
     for (var gz2 = 0; gz2 < G.h; gz2++) for (var gx2 = 0; gx2 < G.w; gx2++) {
       if (G.cls[gz2 * G.w + gx2] !== "2") continue;
@@ -298,6 +297,7 @@
     var reedCols = ["#8a6a58", "#9b7a5e", "#7a5c50", "#a88a66"];
     reeds.forEach(function (r, i) { s.set(1, rr(0.6, 1.4), 1); q.identity(); p.set(r[0], r[1] - 0.2, r[2]); m4.compose(p, q, s); reedM.setMatrixAt(i, m4); col.set(reedCols[i % 4]); reedM.setColorAt(i, col); });
     scene.add(reedM);
+
   })();
 
   /* ---------- horses in the pastures ---------- */
@@ -366,7 +366,6 @@
   var CHAPTERS = [
     { pos: at(P.overview, -60, 470, 560), look: at(P.overview, -150, 0, -40), dusk: 0, anchor: null },           // the whole farm
     { pos: at(P.lake, 40, 190, 330), look: at(P.lake, -60, 0, -60), dusk: 0, anchor: "lake" },                    // Narrin Lake, from the south
-    { pos: at(P.marsh, 60, 120, 170), look: at(P.marsh, -40, 0, 0), dusk: 0.03, anchor: "marsh" },              // the marsh & dock
     { pos: at(P.clubhouse, 60, 70, 75), look: at(P.clubhouse, -10, 0, -18), dusk: 0.06, anchor: "clubhouse" },   // Clubhouse & Lodge
     { pos: at(P.woods, 40, 75, 95), look: at(P.woods, -2, 0, -4), dusk: 0.1, anchor: "woods" },                  // Woods & Grooms
     { pos: at(P.boardwalk, 30, 62, 45), look: at(P.boardwalk, -6, 0, -4), dusk: 0.12, anchor: "boardwalk" },     // trail through the woods
@@ -375,8 +374,8 @@
     { pos: at(P.pasture, 120, 70, 140), look: at(P.pasture, -10, 0, -10), dusk: 0.4, anchor: "pasture" },       // pastures
     { pos: at(P.lake, 20, 150, 120), look: at(P.homes, -40, 0, 40), dusk: 1, anchor: null }                      // long evenings
   ];
-  var ANCHORS = { lake: [P.lake, 6], marsh: [P.marsh, 6], clubhouse: [P.clubhouse, 0], lodge: [P.lodge, 2], woods: [P.woods, 0], grooms: [P.grooms, 4], boardwalk: [P.boardwalk, 8], barn: [P.barn, 18], arenas: [P.arenas, 6], pasture: [P.pasture, 6] };
-  var ANCHOR_LABELS = { lake: "Narrin Lake", marsh: "The marsh", clubhouse: "The Clubhouse", lodge: "The Lodge", woods: "The Woods", grooms: "The Grooms", boardwalk: "Boardwalk trail", barn: "Barn", arenas: "Riding arenas", pasture: "Pastures" };
+  var ANCHORS = { lake: [P.lake, 6], clubhouse: [P.clubhouse, 0], lodge: [P.lodge, 2], woods: [P.woods, 0], grooms: [P.grooms, 4], boardwalk: [P.boardwalk, 8], barn: [P.barn, 18], arenas: [P.arenas, 6], pasture: [P.pasture, 6] };
+  var ANCHOR_LABELS = { lake: "Narrin Lake", clubhouse: "The Clubhouse", lodge: "The Lodge", woods: "The Woods", grooms: "The Grooms", boardwalk: "Boardwalk trail", barn: "Barn", arenas: "Riding arenas", pasture: "Pastures" };
   var EXTRA_PIN = { clubhouse: "lodge", woods: "grooms" }; // chapters that show two homes
 
   var steps = Array.prototype.slice.call(document.querySelectorAll(".tour-step"));
