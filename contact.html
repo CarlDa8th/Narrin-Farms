@@ -131,10 +131,15 @@
           <div class="field full"><label for="f-msg">Message</label><textarea id="f-msg" name="message" placeholder="Tell us a little about your plans…"></textarea></div>
         </div>
         <div class="form-foot">
-          <small>Sending opens your email app with everything filled in, addressed to service@narrinfarms.com.</small>
-          <button class="btn" type="submit">Send inquiry</button>
+          <small>We’ll put your inquiry together, ready to email to service@narrinfarms.com.</small>
+          <button class="btn" type="submit">Prepare inquiry</button>
         </div>
-        <div class="form-status" role="status">Thanks! Your email app should open with your message ready to send. If it didn’t, email us at <a href="mailto:service@narrinfarms.com">service@narrinfarms.com</a> or call (248) 692-7831.</div>
+        <div class="form-status" role="status">
+          <p><strong>Your inquiry is ready.</strong> Send it to <span class="selectable">service@narrinfarms.com</span> or call <span class="selectable">(248) 692-7831</span>.</p>
+          <label class="sr-only" for="fs-text">Your message</label>
+          <textarea class="fs-text" id="fs-text" readonly rows="8"></textarea>
+          <div class="fs-actions"><a class="btn fs-mail" href="mailto:service@narrinfarms.com">Open in email app</a><button type="button" class="btn outline fs-copy">Copy message</button></div>
+        </div>
       </form>
     </div>
   </section>
@@ -158,6 +163,7 @@
             <button type="button" data-layer="satellite" aria-pressed="false">Satellite</button>
             <button type="button" data-layer="hybrid" class="active" aria-pressed="true">Hybrid</button>
             <button type="button" data-layer="map" aria-pressed="false">Map</button>
+            <button type="button" data-layer="plan" aria-pressed="false">Plan</button>
           </div>
           <ul class="map-places">
             <li><button type="button" data-place="farm"><span class="dot" style="background:#a4402c"></span><span>The farm<small>1100 Bird Rd</small></span></button></li>
@@ -186,7 +192,7 @@
         <div><strong>~15 min</strong><span>to Clarkston &amp; Holly</span></div>
         <div><strong>0.7 mi</strong><span>to Holly State Recreation Area</span></div>
       </div>
-      <p class="mt-1" style="font-size:.85rem;color:var(--muted)">Drive times are approximate and depend on traffic. GPS will bring you to 1100 Bird Rd — follow the farm signs from the road.</p>
+      <p class="mt-1" style="font-size:.85rem;color:var(--muted)">Drive times are approximate and depend on traffic. GPS will bring you to 1100 Bird Rd.</p>
     </div>
   </section>
 

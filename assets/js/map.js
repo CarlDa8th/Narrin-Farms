@@ -8,7 +8,9 @@
   if (!window.L) return;
 
   // Farm buildings on the east side of Narrin Lake (lake centre: USGS GNIS 633215).
-  var FARM = [42.8302, -83.4680];
+  var FARM = [42.8305, -83.4683];
+  // extent of the traced farm plan (assets/img/farm-ground.jpg)
+  var PLAN_BOUNDS = [[42.82610, -83.47559], [42.83276, -83.46628]];
   var LAKE = [42.8301, -83.4729];
   var ADDRESS = "1100 Bird Rd, Ortonville, MI 48462";
   var DIRECTIONS = "https://www.google.com/maps/dir/?api=1&destination=" + encodeURIComponent(ADDRESS);
@@ -29,7 +31,8 @@
       L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}", { maxZoom: 19 })
     ]);
     var street = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "&copy; OpenStreetMap contributors" });
-    return { sat: sat, labels: labels, street: street };
+    var plan = L.imageOverlay("assets/img/farm-ground.jpg", PLAN_BOUNDS, { attribution: "Farm plan traced from aerial imagery" });
+    return { sat: sat, labels: labels, street: street, plan: plan };
   }
 
   function popupHtml(p) {
@@ -70,11 +73,28 @@
         layerBtns.forEach(function (x) { x.classList.remove("active"); x.setAttribute("aria-pressed", "false"); });
         b.classList.add("active"); b.setAttribute("aria-pressed", "true");
         var mode = b.getAttribute("data-layer");
-        [layers.sat, layers.labels, layers.street].forEach(function (l) { if (map.hasLayer(l)) map.removeLayer(l); });
-        if (mode === "satellite") layers.sat.addTo(map);
-        if (mode === "hybrid") { layers.sat.addTo(map); layers.labels.addTo(map); }
-        if (mode === "map") layers.street.addTo(map);
+        setMode(mode);
       });
+    });
+    function setMode(mode) {
+      [layers.sat, layers.labels, layers.street, layers.plan].forEach(function (l) { if (map.hasLayer(l)) map.removeLayer(l); });
+      if (mode === "satellite") layers.sat.addTo(map);
+      if (mode === "hybrid") { layers.sat.addTo(map); layers.labels.addTo(map); }
+      if (mode === "map") layers.street.addTo(map);
+      if (mode === "plan") layers.plan.addTo(map);
+      mapDiv.style.background = mode === "plan" ? "#3d5230" : "";
+      layerBtns.forEach(function (x) { var on = x.getAttribute("data-layer") === mode; x.classList.toggle("active", on); x.setAttribute("aria-pressed", on ? "true" : "false"); });
+    }
+    // Where satellite tiles can't load (blocked network, offline), fall back to the farm plan.
+    var tileOk = 0, tileBad = 0, fellBack = false;
+    layers.sat.on("tileload", function () { tileOk++; });
+    layers.sat.on("tileerror", function () {
+      tileBad++;
+      if (!fellBack && tileOk === 0 && tileBad >= 2) {
+        fellBack = true; setMode("plan");
+        var hint = el.querySelector(".map-hint");
+        if (hint) { hint.style.display = ""; hint.textContent = "Satellite imagery isn’t available here, so you’re seeing the farm plan. Use Get directions for satellite view."; }
+      }
     });
 
     // place buttons

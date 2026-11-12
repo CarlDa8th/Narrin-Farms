@@ -137,12 +137,26 @@
       });
       lines.push("", fd.get("message") || "");
       var subject = labels[type] + " — " + fd.get("name");
-      var href = "mailto:service@narrinfarms.com?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(lines.join("\n"));
-      window.location.href = href;
+      var text = lines.join("\n");
+      var href = "mailto:service@narrinfarms.com?subject=" + encodeURIComponent(subject) + "&body=" + encodeURIComponent(text);
       var status = document.querySelector(".form-status");
-      if (status) status.classList.add("show");
+      if (status) {
+        status.querySelector(".fs-text").value = "To: service@narrinfarms.com\nSubject: " + subject + "\n\n" + text;
+        status.querySelector(".fs-mail").href = href;
+        status.classList.add("show");
+        status.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      }
     });
   }
+
+  var copyBtn = document.querySelector(".fs-copy");
+  if (copyBtn) copyBtn.addEventListener("click", function () {
+    var ta = document.querySelector(".fs-text");
+    function done(ok) { copyBtn.textContent = ok ? "Copied" : "Select the text and copy it"; }
+    try {
+      navigator.clipboard.writeText(ta.value).then(function () { done(true); }, function () { ta.select(); done(false); });
+    } catch (err) { ta.select(); done(false); }
+  });
 
   /* ----- footer year ----- */
   document.querySelectorAll("[data-year]").forEach(function (el) { el.textContent = new Date().getFullYear(); });
